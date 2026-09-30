@@ -1,0 +1,46 @@
+{
+  "name": "am2pm-crm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AM2PM multi-client call-center CRM: auto-import, dedupe, auto-assign, click-to-call telephony, outbound webhooks.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file=.env.local --import tsx scripts/db-migrate.ts",
+    "db:studio": "node --env-file=.env.local ./node_modules/.bin/drizzle-kit studio"
+  },
+  "dependencies": {
+    "@upstash/qstash": "^2.12.0",
+    "@upstash/redis": "^1.39.0",
+    "@vercel/functions": "^3.1.0",
+    "drizzle-orm": "^0.45.3",
+    "next": "^16.0.0",
+    "pg": "^8.23.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/node": "^20.19.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

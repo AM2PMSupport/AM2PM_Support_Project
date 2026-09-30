@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/relay-outbox",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/sweep-unassigned",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/sweep-stuck-calls",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/purge-expired",
+      "schedule": "30 20 * * *"
+    },
+    {
+      "path": "/api/cron/recount-open-leads",
+      "schedule": "0 21 * * *"
+    }
+  ]
+}

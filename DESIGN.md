@@ -1,0 +1,369 @@
+# DESIGN — AM2PM Call Center CRM
+
+Detailed design: data model, algorithms, events, API and screens. System shape is in [ARCHITECTURE.md](ARCHITECTURE.md); rules that code must follow are in [RULE.md](RULE.md).
+
+## 1. Data model overview
+
+Neon serverless Postgres, modelled with Drizzle ORM. **`lib/db/schema.ts` is the source of truth**; this section summarises it. Migrations live in `drizzle/`: `0000_init.sql` (tables, foreign keys, indexes) and `0001_rls.sql` (row-level security).
+
+| Group | Tables |
+| --- | --- |
+| Platform | `tenants` (global) · `users` · `processes` · `user_processes` (M:N) · `integrations` · `telephony_dids` |
+| Leads | `contacts` · `leads` · `lead_events` · `import_sources` · `assignment_state` |
+| Activity | `interactions` · `dispositions` · `callbacks` |
+| Events | `webhook_events` · `outbox` · `webhook_subscriptions` · `webhook_deliveries` · `audit_logs` |
+| Planned (T1.26, T2.13, T3.x) | `import_batches` · `workflows` · `workflow_runs` · `daily_stats` · `backup_policies` · `backup_snapshots` · `restore_jobs` · `teams` · `team_members` · `custom_field_definitions` |
+
+### Modelling rules
+| Situation | Choice | Example |
+| --- | --- | --- |
+| Relation between records | Foreign key column + index | `leads.process_id → processes`, `leads.assigned_to → users` |
+| Many-to-many | Join table | `user_processes (user_id, process_id)` |
+| Unbounded child list | Its own table | `interactions`, `lead_events`, `callbacks` |
+| Shape varies per client | JSONB | `leads.custom`, `contacts.consent`, `processes.assignment` |
+| Point-in-time snapshot | Copied column | `interactions.agent_name`, `leads.last_disposition` |
+| Hot counters | Redis (rebuildable) | live queue length, presence |
+
+Every tenant table has `id uuid` (default `gen_random_uuid()`), `tenant_id uuid` (FK → tenants, default `current_setting('app.tenant_id')`), and `created_at` / `updated_at` (`timestamptz`, UTC). Every tenant index starts with `tenant_id`.
+
+### Core relationships
+```
+tenants ─< processes ─< leads ─< interactions
+   │          │  └─1:1─ assignment_state   ├─< lead_events
+   │          ├─< dispositions            └─< callbacks
+   │          ├─< import_sources ─< leads.import_source_id
+   │          └─< telephony_dids >─ integrations
+   └─< users >─< user_processes >─ processes          users ─< leads (assigned_to)
+contacts ─< leads ; contacts ─< interactions
+outbox ··< webhook_deliveries >─ webhook_subscriptions   (event_id: no FK, outbox is purged sooner)
+```
+
+### Tenant isolation (row-level security)
+- Tenant code runs inside `withTenant(ctx, fn)`: one transaction that does `set_config('app.tenant_id', …, true)` and `SET LOCAL ROLE app_rls`.
+- `app_rls` has no BYPASSRLS. Policy on every tenant table: `USING/WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)`.
+- `tenants`: `app_rls` may only SELECT its own row. `audit_logs`: `app_rls` may INSERT/SELECT only.
+- `lib/platform-admin` uses the owner connection (not subject to RLS) for cross-tenant sweeps.
+
+## 2. Tables
+
+### 2.1 Platform
+
+**tenants** (global): name, slug (unique, used in webhook URLs), status (active, trial, suspended, closed), timezone (default Asia/Kolkata), currency, settings jsonb.
+
+**users**
+| Column | Notes |
+| --- | --- |
+| email, name | unique (tenant_id, email) |
+| role | super_admin, admin, project_supervisor, manager, process_coordinator, trainer, client, agent |
+| agent_phone_e164, agent_phone_10, agent_phone_verified_at | the phone that rings for click-to-call and inbound (crmv7 roster "Agent Phone"); index (tenant_id, agent_phone_10) for inbound matching |
+| provider_agent_id | agent id in the telephony provider, if it uses one |
+| did | outbound caller-ID DID, kept exactly as registered (leading 0) |
+| share_weight | Percentage / Ratio weight (crmv7 roster Share) |
+| skills text[] | language, city, product tags |
+| max_open_leads, open_leads | cap + live counter (conditional increment) |
+| daily_quota | Number method |
+| is_available | mirrored in Redis presence |
+| status | active, inactive, locked |
+
+**user_processes** (M:N): user_id, process_id — mapping an agent here grants access to that process's leads.
+
+**processes** — one campaign for one client.
+| Column | Notes |
+| --- | --- |
+| name, client_tenant_id (FK tenants) | client served |
+| stages text[], won_stage | reaching won_stage = converted |
+| assignment jsonb | { method, pool?, sticky, workingHours?, slaMinutes, recycleHours?, skillFields? } |
+| dedupe_field, re_enquiry_days | "phoneKey" \| "email" \| a custom field key |
+| status | active, paused, closed |
+
+**integrations**: kind (telephony, whatsapp, email), provider (callerdesk; myoperator, exotel later; interakt, brevo, resend), credentials_enc and webhook_secret_enc (AES-256-GCM), config jsonb { rateLimitPerMin, routingLookup }, status. Unique (tenant_id, kind, provider).
+
+**telephony_dids**: integration_id, number (as registered, leading 0), number_10 (unique per tenant), process_id, direction (inbound, outbound, both), default_for_outbound. Every inbound DID maps to exactly one process.
+
+**custom fields** (planned table `custom_field_definitions`): entity, process_id, key (immutable), label, type, options, validation, indexed. Values live in the row's `custom` JSONB; a GIN index covers ad-hoc filters, and `indexed` fields get an expression index `(tenant_id, (custom->>'key'))`. Max ~50 per entity.
+
+### 2.2 Leads
+
+**contacts**: name, phone_e164, phone_key (last 10 digits), email (lowercase), consent jsonb { whatsapp, email, sms: { optedIn, at, source } }, dnc, custom jsonb. Indexes (tenant_id, phone_key), (tenant_id, email).
+
+**leads** — one enquiry for one process.
+| Column | Notes |
+| --- | --- |
+| process_id, contact_id | FKs |
+| source jsonb, import_source_id | { kind, sourceId, batchId, campaign, adId, formId } |
+| stage, status | status open \| won \| lost \| dnc |
+| assigned_to, assigned_at | FK users |
+| attempts, last_disposition jsonb | |
+| last_interaction_at, next_callback_at, last_enquiry_at, converted_at | queues and SLAs |
+| dedupe_key, is_active | unique (tenant_id, process_id, dedupe_key) WHERE is_active |
+| custom jsonb | GIN index |
+
+Other indexes: (tenant_id, assigned_to, next_callback_at); (tenant_id, process_id, stage); (tenant_id, contact_id); partial (tenant_id, created_at) WHERE assigned_to IS NULL AND status = 'open' for the sweeper.
+
+**lead_events** — append-only history (replaces crmv7 "Timeline History"): lead_id, type (created, merged, assigned, reassigned, stage_changed, disposition_set, callback_set, converted, lost, restored), actor jsonb, before/after jsonb.
+
+**import_sources**: kind (web_form, meta_ads, google_ads, indiamart, justdial, csv, sheet, api), process_id, field_map jsonb, secret_hash (SHA-256; key shown once), status, last_lead_at.
+
+**assignment_state** (PK process_id): seq, smooth_weights jsonb, day, daily_counts jsonb. Locked `FOR UPDATE` while assigning.
+
+### 2.3 Activity
+
+**interactions** — calls, WhatsApp, SMS, email, notes.
+| Column | Notes |
+| --- | --- |
+| type, direction | call, whatsapp, email, sms, note · inbound, outbound |
+| lead_id, contact_id, process_id, agent_id, agent_name | FKs + name snapshot |
+| status | outbound call: initiated, agent_ringing, agent_no_answer, customer_ringing, answered, busy, no_answer, failed, completed, unknown · inbound: ringing, answered, missed, completed |
+| started_at, ended_at, duration_sec, talk_sec | |
+| provider, provider_call_id, correlation_id | unique (tenant_id, correlation_id); unique (tenant_id, provider, provider_call_id) |
+| did, agent_number, customer_number, hangup_by, end_reason | call details |
+| recording_url, recording_key | provider URL (never shown) → Blob/R2 key |
+| disposition jsonb, notes | wrap-up |
+
+**dispositions**: process_id (null = tenant-wide), code (immutable), label, category (positive, negative, neutral, callback, dnc, converted), actions jsonb, sort_order, is_active. Unique (tenant_id, process_id, code). Default set from crmv7: Interested, Not Interested, Call Back, No Answer, …; stages Hot, Warm, Cold. Callback detection matches `call.?back` / `follow.?up`.
+
+**callbacks**: lead_id, assigned_to, due_at, channel, status (pending, done, missed, escalated, cancelled), reason, day, reminded_at, escalated_to. Unique (tenant_id, lead_id, day) WHERE reason = 'missed_call' → at most one missed-call callback per lead per tenant-local day.
+
+### 2.4 Events
+
+| Table | Key columns | Indexes / retention |
+| --- | --- | --- |
+| `webhook_events` | source, idempotency_key, payload jsonb, status (received, processing, done, failed, dead), attempts, error | unique (tenant_id, source, idempotency_key); purged after 60 d |
+| `outbox` | event_type, entity_id, payload jsonb, published_at | partial index WHERE published_at IS NULL; purged 30 d after publish |
+| `webhook_subscriptions` | url (HTTPS), events text[], filters jsonb {processIds, stages}, secret_enc, is_active, failing_since | (tenant_id, is_active) |
+| `webhook_deliveries` | subscription_id, event_id, event_type, status, attempts jsonb (last 6) | unique (subscription_id, event_id); purged after 90 d |
+| `audit_logs` | actor_id, action, entity, entity_id, before, after, ip | insert-only for app_rls |
+| `backup_*`, `restore_jobs`, `daily_stats`, `workflows`, `workflow_runs` | as in the v1.1 design doc, with snake_case columns | planned |
+
+## 3. Lead pipeline
+
+### 3.1 Sources
+| Source | How it arrives | Notes |
+| --- | --- | --- |
+| Website / landing forms | `POST /api/hooks/{tenant}/{sourceId}` + source key | field map per source |
+| Meta Lead Ads | leadgen webhook → Graph API fetch by id | one Meta app for AM2PM; each client connects its page |
+| Google Ads lead forms | lead-form webhook + shared key | key stored hashed |
+| IndiaMART, Justdial | push where offered, else 15-min pull with cursor | |
+| CSV / Excel | Blob upload → QStash, 500 rows per message | per-row report |
+| Google Sheet | 15-min pull of rows after last synced row | migration bridge |
+| Public API | `POST /api/v1/leads` + tenant API key | returns lead id + assignee |
+
+### 3.2 Normalise
+- Apply `fieldMap`; unmapped fields → `custom`.
+- Phone → E.164 + `phoneKey` = last 10 digits; valid Indian mobile = `^[6-9]\d{9}$` (crmv7 `toTenDigits` / `isValidMobile10`).
+- Reject rows with no valid phone and no email; log in batch report.
+- Stamp `source {kind, sourceId, campaign, adId}`.
+
+### 3.3 Dedupe
+```sql
+-- inside withTenant(): one transaction
+insert into leads (process_id, contact_id, dedupe_key, ...) values (...)
+on conflict (tenant_id, process_id, dedupe_key) where is_active do nothing
+returning id;
+-- a row back  → created: insert lead_events(created) + outbox(lead.created), queue "assign-lead"
+-- no row back → merge:   update leads set last_enquiry_at = now() ... ; lead_events(merged); alert owner
+```
+`dedupe_key` = the lead's phone key by default; email or a custom field per process (`processes.dedupe_field`). `ON CONFLICT` is used instead of catching the error because an error inside a Postgres transaction aborts it. After `re_enquiry_days` a closed lead gets `is_active = false`, so a repeat creates a new lead.
+
+## 4. Auto-assignment
+
+**Eligibility (in order):** status active → mapped in `user_processes` (SQL join) → `is_available` → inside working hours (tenant TZ) → `openLeads < maxOpenLeads` → under today's quota (Number) → skills match (Skill). Eligible list cached 30 s in Redis per process.
+
+| Method | Pick |
+| --- | --- |
+| Equal | next eligible agent after `seq` |
+| Percentage / Ratio | smooth weighted round-robin on `shareWeight` |
+| Number | fixed daily quota per agent, then skip |
+| Load-based | fewest `openLeads` |
+| Skill / language / city | only agents whose tags match lead fields |
+| Sticky owner | returning contact → previous owner if eligible (falls back to process method) |
+
+**Smooth weighted round-robin** (A:50, B:30, C:20 → A B A C A B A …):
+```ts
+for (const u of eligible) state.smoothWeights[u] = (state.smoothWeights[u] ?? 0) + weight[u];
+const pick = argmax(eligible, u => state.smoothWeights[u]);
+state.smoothWeights[pick] -= sum(eligible.map(u => weight[u]));
+```
+
+**Atomic pick (one transaction, retry next agent ≤ 3):**
+1. `select … from leads where id = $1 for update` — a second worker for the same lead waits, then sees it assigned.
+2. `select … from assignment_state where process_id = $1 for update` — one assignment at a time per process.
+3. `update users set open_leads = open_leads + 1 where id = $pick and open_leads < max_open_leads returning` — no row = full; try the next candidate.
+4. Save the new state; `update leads set assigned_to, assigned_at`; insert `lead_events` (assigned) + `outbox` (`lead.assigned`).
+
+**Edge cases:** none eligible → sweeper every 5 min, supervisor alert after `slaMinutes`; recycle after `recycleHours` untouched; agent leaves → open leads back to pool; `open_leads` decrements on won/lost/DNC/reassign; nightly `recount-open-leads` job.
+
+## 5. Telephony (click-to-call, no SIP)
+
+All calls go through the provider's REST click-to-call API and webhooks. There is no SIP, PBX, WebRTC or browser audio in this system.
+
+### 5.1 Adapter interface
+```ts
+interface TelephonyAdapter {
+  clickToCall(i: { agentNumber: string; customerNumber: string; callerId: string; correlationId: string }):
+    Promise<{ ok: true; providerCallId?: string } | { ok: false; code: string; message: string }>;
+  verifyWebhook(req: Request, secret: string): Promise<boolean>;
+  parseWebhook(body: unknown): NormalisedCallEvent[];      // one webhook may carry several events
+  routeLookup?(i: { did: string; customerNumber: string }): { agentNumber?: string }; // optional
+}
+
+type NormalisedCallEvent = {
+  kind: "agent_ringing" | "agent_answered" | "agent_no_answer" | "customer_ringing" | "answered"
+      | "busy" | "no_answer" | "failed" | "completed" | "missed" | "recording_ready";
+  direction: "inbound" | "outbound";
+  providerCallId?: string; correlationId?: string;
+  did: string; customerNumber: string; agentNumber?: string;
+  at: Date; durationSec?: number; talkSec?: number; recordingUrl?: string; hangupBy?: "agent" | "customer" | "system";
+};
+```
+The CallerDesk adapter ports crmv7's `canonicalDid`, 10-digit number format and `resolveCustomerPhone_` caller-leg recovery. MyOperator and Exotel adapters come in phase 4.
+
+### 5.2 Outbound state machine
+```
+initiated → agent_ringing → customer_ringing → answered → completed
+    │            └→ agent_no_answer (agent didn't pick up)
+    │                          └→ busy | no_answer | failed (customer side)
+    └→ failed (API rejected)            no webhook in 10 min → unknown (sweeper)
+```
+- `answered` → `leads.attempts + 1`, agent presence On call.
+- Terminal state → release `call:active:{userId}`, presence Wrap-up, disposition required.
+- `agent_no_answer` does not count as a customer attempt.
+
+### 5.3 Inbound handling
+1. DID → process from `telephony_dids` (matched on `number_10`); unknown DID → log to `webhook_events` as `failed` and alert admin.
+2. Recover the real caller number; normalise to `phoneKey`.
+3. Find/create contact and lead (dedupe rules apply; an inbound call is a lead source `kind: inbound_call`).
+4. Answering agent = user whose `agent_phone_10` matches the webhook's agent number; screen-pop to them. Unknown yet → pop to lead owner + process queue.
+5. Missed: interaction `missed`; callback due now for owner (or next eligible agent via assignment); one callback per number per day (crmv7 `missedCallDateKey_` rule); outbox `call.missed`.
+
+### 5.4 Guards
+- One live call per agent (Redis `SET call:active:{userId} NX EX 900`).
+- Call blocked if contact is DNC, agent lacks `agent_phone_e164` or a DID, or the lead is outside the agent's scope.
+- Per-tenant API rate limit from `config.rateLimitPerMin`.
+- Webhooks are idempotent on `{provider, providerCallId, kind}`.
+
+## 6. Events and webhooks
+
+### 6.1 Event catalogue
+| Event | Fires when | Typical receiver |
+| --- | --- | --- |
+| `lead.created` | any import or manual create | Slack, ad-platform offline conversions |
+| `lead.assigned` | auto or manual assignment | agent alert |
+| `disposition.set` | agent saves a call outcome | client BI |
+| `lead.stage_changed` | stage moves | nurture tool |
+| `lead.converted` | disposition category converted, or stage = wonStage | ERP/billing, Meta/Google conversion API |
+| `lead.lost` | negative or DNC disposition closes lead | retargeting removal |
+| `callback.missed` | due + 15 min, no call | supervisor |
+| `call.completed` | a click-to-call or inbound call ends (answered) | QA tool |
+| `call.missed` | inbound call not answered | supervisor, "sorry we missed you" WhatsApp |
+| `backup.completed` / `backup.failed` | tenant backup finishes | client IT, AM2PM ops |
+| `restore.completed` | restore job finishes | client admin |
+
+### 6.2 Payload and signature
+```http
+POST https://client.example.com/crm-hook
+X-AM2PM-Signature: t=1790812345,v1=5f2c...e91
+Content-Type: application/json
+
+{ "id": "evt_6701c2...", "type": "lead.converted", "tenant": "flo-mattress",
+  "occurredAt": "2026-10-01T09:14:05Z",
+  "data": { "leadId": "...", "process": "Flo Mattress - Sales",
+            "contact": { "name": "Rahul S", "phone": "+9198XXXX4321" },
+            "disposition": { "code": "SALE", "label": "Order placed" },
+            "agent": { "id": "...", "name": "Rohit Kumar" },
+            "source": { "kind": "meta_ads", "campaign": "Diwali-26" },
+            "custom": { "mattress_size": "Queen", "budget": 25000 } } }
+```
+`v1 = HMAC-SHA256(secret, t + "." + rawBody)` hex. Receivers reject if `|now − t| > 300 s` and compare with `timingSafeEqual`.
+
+Delivery: retries ~1m, 5m, 30m, 2h, 12h via QStash; 2xx = delivered; each attempt in `webhook_deliveries`; 24 h failing → auto-pause + email admin.
+
+## 7. Access control
+
+Scopes applied in queries: `own` (assigned_to = me) · `team` (assigned_to ∈ my teams' users) · `process` (process_id ∈ my `user_processes`) · `tenant` (enforced by RLS) · `global` (Super Admin, audit-logged). Client role = process scope limited to processes where `clientTenantId` = their tenant.
+
+Legend: V view · C create · E edit · D delete · A approve · X export.
+
+| Module | Super Admin | Admin | Supervisor | Manager | Coordinator | Client | Agent |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Tenants / config | VCEDAX | VCE | V | V | – | – | – |
+| Users | VCEDAX | VCEDX | VE | VE | V | – | own |
+| Leads | VCEDAX | VCEDX | VCEAX | VCEAX | VCE | V (process) | VE (own) |
+| Interactions | VX | VX | VX | VX | V | V (masked) | VC (own) |
+| Callbacks | VCEDX | VCEDX | VCEA | VCEA | VCE | – | VCE (own) |
+| Import sources | VCED | VCED | V | V | – | – | – |
+| Webhooks / workflows | VCEDX | VCED | VE | V | – | – | – |
+| Reports | VX | VX | VX | VX | V | V (assigned) | own |
+| Integrations | VCED | VCE | – | – | – | – | – |
+| Backups | VCEDAX (restore any) | VCX + request restore | V | V | – | V + download (if allowed) | – |
+| Audit logs | V | V | – | – | – | – | – |
+
+Trainer: LMS only (phase 4).
+
+## 8. API surface
+
+| Method + path | Purpose | Auth |
+| --- | --- | --- |
+| `POST /api/hooks/{tenant}/{sourceId}` | lead source webhook | source key / signature |
+| `POST /api/hooks/{tenant}/telephony/{provider}` | inbound + outbound call webhooks, recordings | provider signature / shared secret |
+| `POST /api/hooks/{tenant}/telephony/{provider}/route` | optional routing lookup (answers inline, within provider timeout) | provider signature |
+| `POST /api/hooks/{tenant}/interakt\|brevo\|resend` | message status | provider signature |
+| `POST /api/v1/leads` | create lead (client CRM, partner) | tenant API key |
+| `GET /api/v1/leads?stage=&assignedTo=&cursor=` | list, cursor pagination | session / API key |
+| `PATCH /api/v1/leads/{id}` | stage, custom fields | session |
+| `POST /api/v1/leads/{id}/disposition` | save outcome (+ callback) | session (agent) |
+| `POST /api/v1/leads/{id}/call` | click-to-call: returns `{ interactionId, status }`; 409 if agent already on a call | session (agent) |
+| `GET /api/v1/calls/active` | agent's live call (for page reloads) | session (agent) |
+| `POST /api/v1/users/{id}/verify-phone` | test click-to-call to the agent's own phone | session (admin) |
+| `POST /api/v1/imports` | upload CSV → batch id | session (admin) |
+| `CRUD /api/v1/webhook-subscriptions` | manage outbound webhooks; test-send | session (admin) |
+| `GET /api/v1/backups` | list snapshots | session (admin) |
+| `POST /api/v1/backups` | backup now (1/day) | session (admin) |
+| `POST /api/v1/backups/{id}/download` | 15-min signed URL | session (admin) + fresh TOTP |
+| `POST /api/v1/restores` | request restore | session (admin) |
+| `POST /api/v1/restores/{id}/approve` | second approver starts job | session (super admin) |
+| `GET /api/v1/stream` | SSE: new leads, inbound screen-pop, call status changes | session |
+| `POST /api/jobs/*` | QStash consumers | QStash signature |
+| `GET /api/cron/*` | Vercel Cron entry points | `CRON_SECRET` |
+
+Errors: JSON `{ error: { code, message } }`; list endpoints return `{ items, nextCursor }` (keyset pagination on `(created_at, id)`).
+
+## 9. Screens
+
+| Area | Screen | Key elements |
+| --- | --- | --- |
+| Agent | My queue | callbacks due, missed inbound calls, fresh, recycled; live counter; availability toggle; status Available / On call / Wrap-up |
+| Agent | Inbound screen-pop | toast + auto-open of the caller's lead (or new-lead form) when an inbound call is answered on the agent's phone |
+| Agent | Lead workspace | contact card (masked per role), **Call** button ("Calling your phone…" → Ringing customer → Connected mm:ss → Ended), no dial pad or audio in the browser, disposition + sub-disposition, callback quick picks (Today 6 PM, Tomorrow, +2 days…), stage, custom fields, timeline, WhatsApp/email send (consent-gated) |
+| Manager | Team dashboard | live agents, open/unassigned leads, SLA breaches, reassign |
+| Manager | Reports | funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, period comparisons, CSV export |
+| Admin | Processes | stages, won stage, dispositions, assignment method + weights + caps + hours, dedupe rule |
+| Admin | Sources | add source, field-map editor, key shown once, health, CSV import with batch report |
+| Admin | Users and teams | roster (share, agent phone + Verify test call, DID, skills, caps), process mapping |
+| Admin | Telephony | provider credentials, DIDs → process and direction, default outbound DID, webhook URL to paste into the provider, last webhook received, test call |
+| Admin | Webhooks | subscriptions, event picker, secret once, test-send, delivery log, failed events + Replay |
+| Admin | Backups | snapshots, backup now, download (2FA), export CSV, request restore |
+| Super Admin | Tenants, restore approvals, platform health | |
+| Client portal | Processes, leads (masked), assigned reports, backups (if allowed) | |
+
+UI stack: Next.js App Router, React Server Components, Tailwind CSS + shadcn/ui. Every date shown in the tenant timezone; stored in UTC.
+
+## 10. crmv7 → new system mapping
+
+| crmv7 | New |
+| --- | --- |
+| `Marketing_Leads` + Sync | `import_sources` (sheet) + 15-min pull |
+| `CRM_Calling` row | `leads` + `contacts` |
+| Assigned To / Lead Disposition / Lead Stage / Remark / Callback Date-Time | `assigned_to` / `last_disposition` + interaction / `stage` / interaction `notes` / `callbacks` |
+| Timeline History cell | `lead_events` |
+| Config dropdowns | `dispositions`, `processes.stages` |
+| Config user roster (Name, Email, Share, Agent Phone, DID) | `users` (shareWeight, phone, did) |
+| Lead Assignment Method / Auto-Assign toggle | `processes.assignment` |
+| Remove Duplicates / Duplicate Check Column | `processes.dedupe` |
+| `CRM_WebhookLog` / `CRM_Inbound` / `MissedCalls` | `webhook_events` / inbound `interactions` / missed-call `interactions` + `callbacks` |
+| 📞 Call checkbox + `CRM_CallLog` (CallerDesk `click_to_call_v2`) | Call button → `POST /leads/{id}/call` → adapter `clickToCall` + interaction |
+| Roster "Agent Phone" (calling_party_a) / DID columns | `users.agent_phone_e164` / `users.did` |
+| 💬 WA, 🟢 Interakt, 📧 Email, 📨 Brevo, 📮 Resend + logs | messaging adapters + interactions |
+| Opt-in column / Require Opt-In | `contacts.consent` |
+| Report builders (`rpt*`) | `daily_stats` + dashboards |
+| Time triggers | Vercel Cron (ARCHITECTURE §4) |
