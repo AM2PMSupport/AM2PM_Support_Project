@@ -16,6 +16,9 @@ AM2PM Call Center CRM: a multi-client BPO CRM that replaces the per-client Googl
 | Tables, relations, RLS, API, events, screens | [DESIGN.md](DESIGN.md) and `lib/db/schema.ts` |
 | Flows, jobs, backup, security, cost | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Why something is the way it is | [MEMORIE.md](MEMORIE.md) decision log |
+| An API route or webhook | [API.md](API.md) — update it in the same change |
+| Auth, secrets, isolation, PII | [SECURITY.md](SECURITY.md) |
+| Style, naming, structure, tests | [CODING_STANDARDS.md](CODING_STANDARDS.md) |
 
 `Docs/*.docx` and `Docs/*.pptx` are the source design; the markdown files are derived from them. If they disagree, the .docx (v1.1) wins, and you should flag it. The exception is later decisions in the [MEMORIE.md](MEMORIE.md) decision log, such as the 2026-10-01 click-to-call-only telephony decision; those take precedence.
 
@@ -41,7 +44,7 @@ Run lint, typecheck and the relevant tests before calling work done. Report fail
 4. **State changes other systems care about write an `outbox` row in the same transaction.**
 5. **Assignment is atomic** (`FOR UPDATE` on lead + assignment_state, conditional `open_leads` increment, retry ≤ 3). Percentage/Ratio must interleave.
 6. **No long-running processes.** No change streams, WebSocket servers or BullMQ; stay under ~60 s per function, fan out via QStash.
-7. **One `pg` pool per instance** (max 10, pooled Neon URL, `attachDatabasePool`); only transaction-scoped settings. No HTTP calls inside a transaction.
+7. **Writes on the primary via `withTenant`; pure reads via `withTenantRead`** (replicas by least connections, primary fallback). **One `pg` pool per target per instance** (max 10, pooled Neon URL, `attachDatabasePool`); only transaction-scoped settings. No HTTP calls inside a transaction.
 8. **Every query has an index starting with `tenantId`.** Use cursor pagination, never `skip`.
 9. **Secrets are never returned by the API, logged or committed.** Mask phone numbers by role. Keep PII out of logs and fixtures.
 10. **Providers only through `lib/providers/*` adapters.** Keep the CallerDesk DID's leading 0.
@@ -65,6 +68,15 @@ Run lint, typecheck and the relevant tests before calling work done. Report fail
 ## Porting from crmv7
 
 The Apps Script source is not in this folder; see [MEMORIE.md §6](MEMORIE.md#6-crmv7-behaviours-to-preserve) for behaviour to keep. Ask the owner for `crmv7.gs` before porting a function line by line (e.g. `resolveCustomerPhone_`, `canonicalDid`, report builders).
+
+## Doing setup work (owner's standing instruction, 2026-10-01)
+
+**Do infrastructure and setup tasks yourself with the CLIs** — don't hand the owner click-through steps. The Vercel CLI is installed and logged in (team `am2pm-projects`, project `am2pm_support_project`, already linked).
+
+- Provision / connect / inspect with `vercel integration …`, `vercel integration-resource …`, `vercel api …`, `vercel env …`, `vercel deploy`.
+- Provider-specific work (e.g. Neon read replicas) via the provider CLI through `npx` (e.g. `npx neonctl`).
+- Only ask the owner when a step truly needs them: a browser OAuth approval, a billing approval, or a secret only they hold — and ask for that one action only.
+- Never print secrets: write them straight into `.env.local` and Vercel env vars.
 
 ## Vercel specifics
 

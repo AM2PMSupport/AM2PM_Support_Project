@@ -1,0 +1,111 @@
+/*
+ * AM2PM CRM design system (Tailwind v4).
+ *
+ * Direction: an operations console, not a marketing page. Warm paper
+ * background, ink text, hairline rules, dense tabular data. Brand colours
+ * come from the AM2PM clock logo and carry MEANING, never decoration:
+ *   teal   (#6BD3DC) — live / active / connected
+ *   orange (#F56332) — urgent / overdue / missed / SLA breach
+ * No gradients, no glass, no drop-shadow cards.
+ */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-schibsted), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  /* Surfaces */
+  --color-paper: #f5f3ee;
+  --color-sheet: #fbfaf7;
+  --color-rule: #e3dfd6;
+  --color-rule-strong: #cfc9bd;
+
+  /* Ink */
+  --color-ink: #15171c;
+  --color-ink-2: #3b3f47;
+  --color-ink-3: #6f737b;
+  --color-ink-4: #9a9ca1;
+
+  /* Brand (from the logo) */
+  --color-teal: #6bd3dc;
+  --color-teal-ink: #0f6e76;
+  --color-teal-wash: #e4f6f7;
+  --color-ember: #f56332;
+  --color-ember-ink: #b23a10;
+  --color-ember-wash: #fdebe3;
+
+  /* Supporting states */
+  --color-moss: #3f7d4e;
+  --color-moss-wash: #e5f0e6;
+  --color-amber: #b7791f;
+  --color-amber-wash: #f8eedb;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+}
+
+@layer base {
+  html {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-family: var(--font-sans);
+  }
+  ::selection {
+    background: var(--color-teal);
+    color: var(--color-ink);
+  }
+  /* Numbers line up in tables and timers. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Small-caps section label used across the app. */
+  .eyebrow {
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+    font-weight: 600;
+  }
+  /* Hairline-ruled panel: the only container style in the app. */
+  .panel {
+    background: var(--color-sheet);
+    border: 1px solid var(--color-rule);
+    border-radius: var(--radius-md);
+  }
+  /* Faint dot grid for empty / brand areas. */
+  .dotgrid {
+    background-image: radial-gradient(var(--color-rule-strong) 1px, transparent 1px);
+    background-size: 14px 14px;
+  }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  70% { transform: scale(1.6); opacity: 0; }
+  100% { opacity: 0; }
+}
+.live-dot {
+  position: relative;
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: pulse-ring 1.8s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after { animation: none; }
+}

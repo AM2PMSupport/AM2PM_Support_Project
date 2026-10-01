@@ -246,3 +246,70 @@ Provider charges (CallerDesk minutes, WhatsApp template fees, email volume) excl
 3. Partition `interactions` and `lead_events` by month once they pass ~50M rows; export and detach old partitions per retention.
 4. Move a noisy or regulated client to its own Neon project (requires the per-tenant connection resolver).
 5. Add Ably/Pusher only if SSE/polling costs too much at 2,000 concurrent agents.
+
+## 10. High availability, replication and load distribution
+
+Every layer either replicates itself (managed services) or fails over in our code. Load is spread with **least-connections** where we control routing.
+
+```
+                 Requests
+                    │
+        Vercel edge network (anycast, automatic)          ← no single server; not configurable
+                    │
+     Function instances (Fluid compute, auto-scaled)      ← Vercel spreads requests across instances
+         │                                │
+   writes + read-then-write        pure reads (withTenantRead)
+         │                                │
+         ▼                     least-connections pick (lib/db/least-connections.ts)
+   Neon PRIMARY compute ◄─── fallback ───┤ circuit breaker: replica down → primary for 30 s
+         │                      ┌────────┼────────┐
+         │                  replica-1 replica-2 replica-3   (Neon read replicas, autoscale)
+         └──────────┬───────────┴────────┴────────┘
+       Neon storage: WAL replicated across 3 AWS availability zones (safekeepers, Paxos)
+                    + pageservers with secondaries + object storage (11 nines durability)
+```
+
+### 10.1 What replicates and how fast it recovers
+
+| Layer | Replication / redundancy | Failure | Recovery |
+| --- | --- | --- | --- |
+| Vercel edge + functions | Global edge network; functions on many instances in `sin1` | Instance crash | Next request goes to another instance; QStash retries jobs |
+| Neon storage | WAL synchronously replicated across multiple AZs; pageserver secondaries; object-storage backing ([Neon HA](https://neon.com/docs/introduction/high-availability)) | Storage node / AZ loss | Immediate to seconds, no data loss |
+| Neon primary compute | Stateless; rescheduled on failure (no idle standby needed) | Postgres crash · VM · node · AZ | Seconds · seconds · 1–2 min · 1–10 min |
+| Neon read replicas | Up to 3 on Free, more on paid; share primary storage; asynchronous (eventually consistent); autoscale and scale to zero ([Neon read replicas](https://neon.com/docs/introduction/read-replicas)) | Replica down | App opens a 30 s circuit and serves reads from the primary (`withTenantRead`) |
+| Upstash QStash | Managed, multi-node; at-least-once delivery, retries, DLQ | Delivery failure | Retries ~1m, 5m, 30m, 2h, 12h |
+| Upstash Redis | Managed; holds only rebuildable state (locks, presence, caches) | Outage | Click-to-call refuses until back (fail-safe: no double calls); leads, webhooks unaffected |
+| Whole region (Neon `sin1`) | **No cross-region replication on Neon** | Region outage | Manual DR: restore latest backup into a Neon project in another region and repoint `DATABASE_URL` (RTO hours, RPO ≤ 24 h) — see §7 |
+
+Session state (temp tables, prepared statements, connection cache) does not survive a Neon compute failover. We use none of it: tenant settings are transaction-scoped and jobs are idempotent, so a failed transaction is simply retried by QStash.
+
+### 10.2 Load distribution — least connections
+
+| Where | Algorithm | Who does it |
+| --- | --- | --- |
+| HTTP requests → function instances | Vercel's own routing (not user-configurable) | Vercel |
+| Pure reads → read replicas | **Least connections**: replica with the fewest connections in use + waiting; ties → least recently used; unhealthy skipped | Our code: `getReadTarget()` in `lib/db/client.ts` |
+| Leads → agents (Load-based method) | **Least open leads** (least-connections applied to people) | `pickLoad()` in `lib/assignment/methods.ts` |
+| Writes | Single primary (Postgres has one writer) | — |
+| Background work | QStash queue; Vercel scales consumers | QStash + Vercel |
+
+Least-connections is measured per function instance (each has its own small pools). Across many instances the choices average out, and replicas autoscale, so no central coordinator is needed.
+
+### 10.3 Using replicas in code
+
+- `withTenant(ctx, fn)` — primary, read-write. **All writes, and any read that decides a write** (dedupe, assignment, call state).
+- `withTenantRead(ctx, fn)` — replica (least connections), read-only, same RLS. **Lists, dashboards, reports, exports.** Replicas lag slightly, so never read-then-write through it.
+- **Live:** `replica-1` (Neon project `jolly-flower-95357933`, read-only, 0.25–2 CU) is in `DATABASE_REPLICA_URLS` and healthy in `/api/health`.
+- Add more: `npx neonctl branches add-compute main --project-id jolly-flower-95357933 --type read_only --cu 0.25-2 --name replica-2`, then `npx neonctl connection-string main --project-id … --endpoint-type read_only --pooled` (note: `--endpoint-id` is ignored by this command — always verify the host is the replica's), append to `DATABASE_REPLICA_URLS` (comma-separated pooled URLs) in Vercel and redeploy. No code change. `/api/health` lists replicas and whether each is in rotation.
+
+### 10.4 Indexing
+
+Every query has an index built for it, and partial-text search uses trigram indexes, so call lookup, screen-pop and search stay in milliseconds as clients grow. Full catalogue in [DESIGN.md §2.5](DESIGN.md#25-indexing-and-quick-search).
+
+### 10.5 Targets
+
+| Metric | Target (pilot) | Target (scale) |
+| --- | --- | --- |
+| Availability (app + DB) | 99.5% | 99.9% (Pro, replicas, monitoring on `/api/health`) |
+| RPO (data loss) | Minutes within a region (PITR on Launch); ≤ 24 h cross-region | Same; 6 h with premium backups |
+| RTO | Minutes for compute/AZ failures; hours for region loss | Same, with a rehearsed DR runbook |

@@ -7,6 +7,8 @@
  * tests exercise the real isolation rules — not a mock.
  */
 import { PGlite } from "@electric-sql/pglite";
+import { btree_gin } from "@electric-sql/pglite/contrib/btree_gin";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { setDbForTests, type Db } from "@/lib/db/client";
@@ -14,7 +16,8 @@ import * as schema from "@/lib/db/schema";
 import type { TenantContext } from "@/lib/tenancy/context";
 
 export async function createTestDb() {
-  const client = new PGlite();
+  // Same extensions as production (drizzle/0002_search_extensions.sql).
+  const client = new PGlite({ extensions: { pg_trgm, btree_gin } });
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: "./drizzle" });
   // PGlite and node-postgres drizzle instances share the same query API.

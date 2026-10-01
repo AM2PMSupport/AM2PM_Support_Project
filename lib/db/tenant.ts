@@ -14,9 +14,11 @@
  * WHERE clause (RULE.md §1).
  *
  * Keep transactions short: no HTTP calls to providers inside `fn`.
+ * Pure reads can use withTenantRead() below (read replicas, least connections).
  */
 import { sql } from "drizzle-orm";
-import { getDb, type Tx } from "@/lib/db/client";
+import { getDb, getReadTarget, isConnectionError, markReplicaDown, type Db, type Tx } from "@/lib/db/client";
+import { log } from "@/lib/log";
 import type { TenantContext } from "@/lib/tenancy/context";
 
 export type { Tx };
@@ -28,12 +30,42 @@ export function isUuid(v: unknown): v is string {
 }
 
 export async function withTenant<T>(ctx: TenantContext, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return runAsTenant(getDb(), ctx, fn, "read write");
+}
+
+/**
+ * Read-only variant for pure reads — lists, dashboards, reports, exports.
+ * Runs on the read replica with the LEAST active connections; if that
+ * replica cannot be reached it is taken out of rotation for 30 s and the
+ * read is retried once on the primary. Same RLS rules apply (replicas share
+ * the primary's storage, roles and policies).
+ *
+ * Never use it for a read that decides a write (replicas lag slightly):
+ * do those inside withTenant() on the primary.
+ */
+export async function withTenantRead<T>(ctx: TenantContext, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  const target = getReadTarget();
+  if (target.name === "primary") return runAsTenant(target.db, ctx, fn, "read only");
+  try {
+    return await runAsTenant(target.db, ctx, fn, "read only");
+  } catch (err) {
+    if (!isConnectionError(err)) throw err;
+    markReplicaDown(target);
+    log.warn("read replica unreachable; failing over to primary", { replica: target.name });
+    return runAsTenant(getDb(), ctx, fn, "read only");
+  }
+}
+
+async function runAsTenant<T>(db: Db, ctx: TenantContext, fn: (tx: Tx) => Promise<T>, accessMode: "read only" | "read write"): Promise<T> {
   if (!isUuid(ctx.tenantId)) throw new Error("withTenant: invalid tenantId");
-  return getDb().transaction(async (tx) => {
-    await tx.execute(sql`select set_config('app.tenant_id', ${ctx.tenantId}, true)`);
-    await tx.execute(sql`set local role app_rls`);
-    return fn(tx);
-  });
+  return db.transaction(
+    async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${ctx.tenantId}, true)`);
+      await tx.execute(sql`set local role app_rls`);
+      return fn(tx);
+    },
+    { accessMode },
+  );
 }
 
 /** Postgres unique-violation (dedupe, idempotency). */

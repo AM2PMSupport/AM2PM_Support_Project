@@ -4,9 +4,12 @@
 
 Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 
-**Code foundation landed 2026-10-01; database moved to Neon Postgres the same day.** `[~]` items have code with a `TODO(Tx.y)` comment marking what is left; grep for the task id to find it. Open items inside those:
+**Infra live 2026-10-01: Neon (Singapore) + read replica `replica-1`, QStash, dedicated Redis `am2pm-crm-redis` (Mumbai); `/api/health` all green. T0.2 still needs Pro + Git connection; T3.16 still needs dashboard queries moved to `withTenantRead()`.**
+
+**Code foundation landed 2026-10-01; database moved to Neon Postgres the same day; read-replica routing (least connections + failover) added the same day — replicas themselves are T3.16.** `[~]` items have code with a `TODO(Tx.y)` comment marking what is left; grep for the task id to find it. Open items inside those:
 - T1.1: Tailwind + shadcn/ui and Playwright not added yet.
 - T1.6: done for current tables; add the planned tables (import_batches, workflows, daily_stats, backup_*) with their RLS policies as they are built.
+- **Hobby plan (temporary, 2026-10-01):** the Vercel team is on Hobby, which allows only daily crons, so `vercel.json` runs relay-outbox, sweep-unassigned and sweep-stuck-calls once a day. After upgrading to Pro, restore `* * * * *`, `*/5 * * * *`, `*/5 * * * *` (T3.15).
 - T1.9: 5 crons so far (outbox relay, unassigned sweeper, stuck-call sweeper, retention purge, open-leads recount).
 - T1.21: owner alert on merge.
 - T1.28: Redis cache of eligible agents.
@@ -14,15 +17,16 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - T1.37a: CallerDesk parameter and webhook field names must be checked against real payloads (T0.7, T0.9).
 - T1.37d, T1.38a: screen-pop and live status need the SSE stream (T1.40).
 - T2.10: email to admins when a subscription auto-pauses.
+- T1.33–T1.35: screens built (console queue, lead workspace, call control, outcomes with callback picks) on sample data; need sign-in (T1.11) + read/write APIs to go live. Leads, Floor and Setup screens are also built (preview).
 
 ## Phase 0 — Decisions and setup (before week 1)
 
 - [ ] T0.1 Close open decisions in [PRD.md §10](PRD.md#10-open-decisions) (volumes, live sources, `lead.converted` receivers, CallerDesk fallback, retention, build team)
-- [ ] T0.2 Create Vercel team + project (Pro plan); connect Git repo
-- [ ] T0.3 Provision Neon Postgres via Vercel Marketplace, region AWS Mumbai (ap-south-1); Free plan for dev/pilot; run `npm run db:migrate`
-- [ ] T0.4 Provision Upstash QStash + Redis via Vercel Marketplace
+- [~] T0.2 Create Vercel team + project (Pro plan); connect Git repo
+- [x] T0.3 Provision Neon Postgres via Vercel Marketplace, region AWS Mumbai (ap-south-1); Free plan for dev/pilot; run `npm run db:migrate`
+- [x] T0.4 Provision Upstash QStash + Redis via Vercel Marketplace
 - [ ] T0.5 Create Vercel Blob store (or R2 bucket) for recordings/CSVs; separate R2 account + bucket (versioning, object lock) for backups
-- [ ] T0.6 Pull env vars locally (`vercel env pull .env.local`); document all vars in README
+- [x] T0.6 Pull env vars locally (`vercel env pull .env.local`); document all vars in README
 - [ ] T0.7 Collect sample payloads: CallerDesk click-to-call responses (success + each error), outbound and inbound call webhooks (start, answer, call_report, missed, recording), Interakt, Brevo, Resend, Meta leadgen
 - [ ] T0.9 Confirm with CallerDesk: click-to-call API params, webhook events and signing, custom/correlation field support, inbound routing options (sticky agent, routing-lookup URL), recording URL lifetime
 - [ ] T0.10 List every client DID with its process and direction; list agent phone numbers
@@ -73,9 +77,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] T1.32 Nightly `open_leads` recount (`recount-open-leads` cron)
 
 ### Agent workspace and telephony
-- [ ] T1.33 My queue (callbacks due → fresh → recycled); availability toggle
-- [ ] T1.34 Lead workspace: contact card, custom fields, timeline, stage change
-- [ ] T1.35 Disposition + sub-disposition form; required before next call; callback quick picks
+- [~] T1.33 My queue (callbacks due → fresh → recycled); availability toggle
+- [~] T1.34 Lead workspace: contact card, custom fields, timeline, stage change
+- [~] T1.35 Disposition + sub-disposition form; required before next call; callback quick picks
 - [ ] T1.36 Callbacks model + reminder cron (5 min): notify 15 min before, missed, escalate at 30 min
 - [x] T1.37 `TelephonyAdapter` interface + normalised call events (DESIGN §5.1)
 - [~] T1.37a CallerDesk adapter `clickToCall` (10-digit numbers, `canonicalDid`, error mapping to plain messages)
@@ -88,6 +92,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] T1.38c Stuck-call sweeper (5 min): `initiated` > 10 min → `unknown`, release locks, alert on silent provider
 - [ ] T1.39 Recording copy to Blob/R2 + signed URL playback + audit
 - [ ] T1.40 SSE `/api/v1/stream` (or 5 s poll of Redis counter) for new leads, inbound screen-pop and live call status
+- [~] T1.47 Quick search: trigram + call-lookup indexes and `searchContacts()` done (on Neon); `GET /api/v1/search` + search box in the agent UI after sign-in
 - [ ] T1.41 Conversion transaction (status won, converted_at, open_leads − 1, events)
 
 ### Notifications and backup
@@ -138,6 +143,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [ ] T3.12 Vercel Firewall rate limits on `/api/hooks/*` and login
 - [ ] T3.13 Move Neon to the Launch plan (point-in-time restore) + IP allow list; add a read replica for reports if needed
 - [ ] T3.14 Migrate remaining clients; set Apps Script sheets read-only
+- [ ] T3.15 Upgrade Vercel team to Pro (commercial use) and restore the 1-min / 5-min cron schedules in `vercel.json`
+- [~] T3.16 Create 1–2 Neon read replicas; set `DATABASE_REPLICA_URLS` in Vercel; move dashboard/report/export queries to `withTenantRead()`
+- [ ] T3.17 DR runbook + drill: restore latest backup into a Neon project in another region, repoint `DATABASE_URL`, measure RTO
+- [ ] T3.18 Uptime monitor on `/api/health` (alert when `ok:false` or any replica out of rotation)
 - [ ] **Gate 3:** all clients off Sheets; Apps Script read-only
 
 ## Phase 4 — Later (week 15+)

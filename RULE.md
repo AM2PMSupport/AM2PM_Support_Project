@@ -23,13 +23,15 @@ These rules apply to every change. A PR that breaks one is not merged. Why each 
 5. Relations are foreign keys; many-to-many uses a join table. JSONB is only for per-client shapes (custom fields, settings, payloads).
 6. Snapshot small values (agent name, disposition label) into the row that needs history; the source of truth stays in one place.
 7. Keyset pagination (`(created_at, id) < (…)`) — never `OFFSET` for queues or timelines.
-8. Every new query has a supporting index starting with `tenant_id`; check `EXPLAIN (ANALYZE)` on realistic data.
+8. Every new query has a supporting index starting with `tenant_id` (catalogue: DESIGN.md §2.5); check `EXPLAIN (ANALYZE)` on realistic volume, not a 3-row table. Text search uses the trigram indexes via `searchContacts()`; never `ILIKE '%…%'` on an unindexed column. Escape user input in LIKE patterns.
 9. Dashboards read `daily_stats`, never raw `interactions`.
 10. Store `timestamptz` (UTC); display in the tenant timezone.
 11. Field keys, disposition codes and custom-field keys are immutable; only labels change. Deletes of definitions are soft.
 12. Schema changes only via `lib/db/schema.ts` → `npm run db:generate` → reviewed SQL in `drizzle/` → `npm run db:migrate`. Never edit tables by hand in Neon.
 13. One `pg` pool per function instance (`max: 10`, `attachDatabasePool`), on Neon's pooled URL. Only transaction-scoped settings (`set_config(…, true)`, `SET LOCAL`) — never session-level `SET`, because PgBouncer reuses connections.
 14. Recordings and files never go in the database — store the Blob/R2 key only.
+15. Pure reads (lists, dashboards, reports, exports) use `withTenantRead()` — read replica chosen by least connections, read-only, primary fallback. Anything that reads in order to write uses `withTenant()` on the primary; replicas lag.
+16. Code must survive a database failover: no session-level state, idempotent jobs, and connection errors left to QStash retries.
 
 ## 3. Serverless and queues
 

@@ -13,8 +13,8 @@ function lazy<T>(parse: () => T): () => T {
   return () => (cached ??= parse());
 }
 
-function parse<S extends z.ZodType>(schema: S, group: string): z.infer<S> {
-  const result = schema.safeParse(process.env);
+function parse<S extends z.ZodType>(schema: S, group: string, source: Record<string, unknown> = process.env): z.infer<S> {
+  const result = schema.safeParse(source);
   if (!result.success) {
     const names = result.error.issues.map((i) => i.path.join(".")).join(", ");
     throw new Error(`Missing or invalid env for ${group}: ${names}. See .env.example.`);
@@ -31,6 +31,13 @@ export const databaseEnv = lazy(() =>
     z.object({
       // Neon POOLED connection string (runtime). Migrations use DATABASE_URL_UNPOOLED.
       DATABASE_URL: z.string().startsWith("postgres"),
+      // Optional Neon read replicas (comma-separated pooled URLs). Reads made
+      // with withTenantRead() go to the replica with the fewest active
+      // connections; empty = all reads use the primary.
+      DATABASE_REPLICA_URLS: z
+        .string()
+        .optional()
+        .transform((v) => (v ?? "").split(",").map((u) => u.trim()).filter((u) => u.startsWith("postgres"))),
     }),
     "Postgres",
   ),
@@ -47,15 +54,17 @@ export const qstashEnv = lazy(() =>
   ),
 );
 
-export const redisEnv = lazy(() =>
-  parse(
-    z.object({
-      UPSTASH_REDIS_REST_URL: z.url(),
-      UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
-    }),
+export const redisEnv = lazy(() => {
+  // The Vercel Marketplace Upstash integration injects KV_REST_API_*;
+  // a directly-created Upstash database uses UPSTASH_REDIS_REST_*. Accept both.
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  return parse(
+    z.object({ UPSTASH_REDIS_REST_URL: z.url(), UPSTASH_REDIS_REST_TOKEN: z.string().min(1) }),
     "Redis",
-  ),
-);
+    { UPSTASH_REDIS_REST_URL: url, UPSTASH_REDIS_REST_TOKEN: token },
+  );
+});
 
 export const securityEnv = lazy(() =>
   parse(

@@ -135,6 +135,58 @@ Other indexes: (tenant_id, assigned_to, next_callback_at); (tenant_id, process_i
 | `audit_logs` | actor_id, action, entity, entity_id, before, after, ip | insert-only for app_rls |
 | `backup_*`, `restore_jobs`, `daily_stats`, `workflows`, `workflow_runs` | as in the v1.1 design doc, with snake_case columns | planned |
 
+### 2.5 Indexing and quick search
+
+Every query the app runs has an index built for it. Rules: tenant-scoped indexes start with `tenant_id`; partial indexes cover hot subsets (open, pending, unpublished); search uses trigram GIN indexes (`pg_trgm`) made tenant-first with `btree_gin` (`drizzle/0002_search_extensions.sql`). Definitions live in `lib/db/schema.ts`; the planner checks are in `tests/integration/search.test.ts`.
+
+**Quick call lookup**
+
+| Query | Index | Type |
+| --- | --- | --- |
+| Match a webhook to our call (correlation id) | `interactions_correlation` (tenant_id, correlation_id) | unique, partial |
+| Match by provider call id | `interactions_provider_call` (tenant_id, provider, provider_call_id) | unique, partial |
+| Fallback match: agent's latest call to a customer | `interactions_agent_customer` (tenant_id, agent_number, customer_number, started_at) | btree |
+| Caller history / screen-pop by phone | `interactions_customer` (tenant_id, customer_number, started_at) | btree |
+| Inbound caller → contact | `contacts_tenant_phone` (tenant_id, phone_key) | btree |
+| Inbound DID → process | `dids_tenant_number10` (tenant_id, number_10) | unique |
+| Answering agent by phone | `users_tenant_phone10` (tenant_id, agent_phone_10) | btree |
+| Lead timeline | `interactions_lead` (tenant_id, lead_id, started_at) | btree |
+| Agent call history | `interactions_agent` (tenant_id, agent_id, started_at) | btree |
+| Stuck-call sweeper | `interactions_initiated` (started_at) WHERE status = 'initiated' | partial |
+
+**Quick search** (`searchContacts()` in `lib/leads/search.ts`; runs on a read replica)
+
+| User types | Routed to | Index |
+| --- | --- | --- |
+| `rahul@gm`, `@example.org` | email ILIKE `%…%` | `contacts_search_email` (GIN trigram) |
+| `+91 98111 14321` (10+ digits) | phone_key = last 10 digits | `contacts_tenant_phone` (btree, exact) |
+| `4321`, `98111` (3–9 digits) | phone_key ILIKE `%…%` | `contacts_search_phone` (GIN trigram) |
+| `Rah`, `sharma` | name ILIKE `%…%`, ranked by `similarity()` | `contacts_search_name` (GIN trigram) |
+| 1 character / 1–2 digits | no search (too vague) | — |
+
+Wildcards in user input (`%`, `_`) are escaped. Results include each contact's active leads and respect RLS.
+
+Measured on Postgres (PGlite): at ~10K contacts the planner prefers the plain tenant index and search takes ~3–5 ms; from ~100K contacts it switches to the trigram indexes, ~1.4–3.4 ms. Both are well under the 500 ms screen target.
+
+**Queues, sweeps and jobs**
+
+| Query | Index |
+| --- | --- |
+| Dedupe on insert | `leads_dedupe_active` (tenant_id, process_id, dedupe_key) WHERE is_active — unique |
+| Agent queue: my leads by next callback | `leads_owner_callback` (tenant_id, assigned_to, next_callback_at) |
+| Open-lead counts / nightly recount | `leads_open_by_owner` (assigned_to) WHERE status = 'open' |
+| Unassigned sweeper | `leads_unassigned` (tenant_id, created_at) WHERE assigned_to IS NULL AND status = 'open' |
+| Leads by stage (pipeline views) | `leads_process_stage` (tenant_id, process_id, stage) |
+| Custom-field filters | `leads_custom_gin` GIN (custom) |
+| Callback reminders (platform cron) | `callbacks_pending_due` (due_at) WHERE status = 'pending' |
+| Agent's due callbacks | `callbacks_owner` (tenant_id, assigned_to, status, due_at) |
+| One missed-call callback per day | `callbacks_missed_once_a_day` unique partial |
+| Webhook idempotency | `webhook_events_idem` (tenant_id, source, idempotency_key) — unique |
+| Outbox relay | `outbox_unpublished` (created_at) WHERE published_at IS NULL |
+| Retention purge | `webhook_events_created`, `webhook_deliveries_created` (created_at) |
+
+**Adding an index:** add it in `lib/db/schema.ts` → `npm run db:generate` → review the SQL → `npm run db:migrate`. Check with `EXPLAIN (ANALYZE)` on realistic volume (a 3-row table proves nothing: the planner is cost-based). For large tables in production, create the index `CONCURRENTLY` in a hand-written migration to avoid blocking writes.
+
 ## 3. Lead pipeline
 
 ### 3.1 Sources
@@ -347,6 +399,20 @@ Errors: JSON `{ error: { code, message } }`; list endpoints return `{ items, nex
 | Client portal | Processes, leads (masked), assigned reports, backups (if allowed) | |
 
 UI stack: Next.js App Router, React Server Components, Tailwind CSS + shadcn/ui. Every date shown in the tenant timezone; stored in UTC.
+
+### 9.1 Visual design (built 2026-10-01)
+
+| Element | Decision |
+| --- | --- |
+| Feel | Operations console, not a marketing page: warm paper `#F5F3EE`, ink `#15171C`, 1px hairline rules, dense tables, no gradients / glass / shadow cards |
+| Brand colour = meaning | Teal `#6BD3DC` (from the logo) = live, connected, active · Orange `#F56332` = overdue, missed, SLA breach, failing |
+| Type | Schibsted Grotesk (UI) + JetBrains Mono (phones, timers, counts — tabular numbers) |
+| Signature details | Live IST shift clock; the logo's clock arc reused as SLA rings (queue) and capacity rings (agents); click-to-call stepper (your phone → customer → connected → ended) |
+| Keyboard | `J`/`K` queue, `C` call, `1–8` outcome, `Enter` save, `/` search |
+| Charts | Hand-drawn SVG, direct labels, no chart library |
+| Code | `app/globals.css` tokens (Tailwind v4 `@theme`), `components/`, sample data in `lib/ui/sample-data.ts` (shapes mirror the DB) |
+
+Screens: `/login`, `/console`, `/leads`, `/dashboard` (Floor), `/admin` (Setup). They render fictional sample data, marked "Sample data", until T1.11 connects them to the APIs.
 
 ## 10. crmv7 → new system mapping
 

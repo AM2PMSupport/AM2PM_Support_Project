@@ -250,7 +250,15 @@ export const contacts = pgTable(
     custom: jsonb("custom").$type<Record<string, unknown>>().notNull().default({}),
     ...timestamps,
   },
-  (t) => [index("contacts_tenant_phone").on(t.tenantId, t.phoneKey), index("contacts_tenant_email").on(t.tenantId, t.email)],
+  (t) => [
+    // Exact lookups: inbound caller → contact, dedupe, email match.
+    index("contacts_tenant_phone").on(t.tenantId, t.phoneKey),
+    index("contacts_tenant_email").on(t.tenantId, t.email),
+    // Search (ILIKE '%…%'): trigram GIN, tenant-first via btree_gin (drizzle/0002).
+    index("contacts_search_name").using("gin", t.tenantId, t.name.op("gin_trgm_ops")),
+    index("contacts_search_phone").using("gin", t.tenantId, t.phoneKey.op("gin_trgm_ops")),
+    index("contacts_search_email").using("gin", t.tenantId, t.email.op("gin_trgm_ops")),
+  ],
 );
 
 export const importSources = pgTable(
@@ -305,6 +313,8 @@ export const leads = pgTable(
     index("leads_contact").on(t.tenantId, t.contactId),
     index("leads_unassigned").on(t.tenantId, t.createdAt).where(sql`${t.assignedTo} is null and ${t.status} = 'open'`),
     index("leads_custom_gin").using("gin", t.custom),
+    // Agent workload / nightly recount: open leads per owner (cross-tenant join on assigned_to).
+    index("leads_open_by_owner").on(t.assignedTo).where(sql`${t.status} = 'open'`),
   ],
 );
 
@@ -384,6 +394,10 @@ export const interactions = pgTable(
       .on(t.tenantId, t.provider, t.providerCallId)
       .where(sql`${t.providerCallId} is not null`),
     index("interactions_lead").on(t.tenantId, t.leadId, t.startedAt),
+    // Quick call lookup: caller history / screen-pop by customer number.
+    index("interactions_customer").on(t.tenantId, t.customerNumber, t.startedAt),
+    // Webhook fallback match: this agent's latest call to this customer.
+    index("interactions_agent_customer").on(t.tenantId, t.agentNumber, t.customerNumber, t.startedAt),
     index("interactions_agent").on(t.tenantId, t.agentId, t.startedAt),
     index("interactions_process").on(t.tenantId, t.processId, t.startedAt),
     // Stuck-call sweeper (platform-wide).
@@ -429,6 +443,8 @@ export const callbacks = pgTable(
   (t) => [
     index("callbacks_due").on(t.tenantId, t.status, t.dueAt),
     index("callbacks_owner").on(t.tenantId, t.assignedTo, t.status, t.dueAt),
+    // Reminder cron (platform-wide): pending callbacks by due time.
+    index("callbacks_pending_due").on(t.dueAt).where(sql`${t.status} = 'pending'`),
     uniqueIndex("callbacks_missed_once_a_day").on(t.tenantId, t.leadId, t.day).where(sql`${t.reason} = 'missed_call'`),
   ],
 );
