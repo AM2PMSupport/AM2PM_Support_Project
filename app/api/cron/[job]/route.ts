@@ -14,7 +14,7 @@ import { enqueue } from "@/lib/queue/qstash";
 import type { JobName } from "@/lib/queue/jobs";
 
 // Schedules are UTC in vercel.json: 20:30 UTC = 02:00 IST, 21:00 UTC = 02:30 IST.
-const CRON_JOBS = new Set<JobName>(["relay-outbox", "sweep-unassigned", "sweep-stuck-calls", "purge-expired", "recount-open-leads"]);
+const CRON_JOBS = new Set<JobName>(["relay-outbox", "sweep-unassigned", "sweep-stuck-calls", "purge-expired", "recount-open-leads", "callback-reminders"]);
 
 export const GET = handle(async (req: Request, { params }: { params: Promise<{ job: string }> }): Promise<Response> => {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");

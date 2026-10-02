@@ -23,6 +23,12 @@ export interface JobPayloads {
   "purge-expired": Record<string, never>;
   /** Recompute users.open_leads from leads to fix drift. */
   "recount-open-leads": Record<string, never>;
+  /** Callback reminders, missed-callback escalation, SLA alerts (every 5 min). */
+  "callback-reminders": Record<string, never>;
+  /** Import the next 500 rows of an uploaded CSV/Excel file (T1.26). */
+  "import-batch": { tenantId: string; batchId: string; offset: number };
+  /** Pull every tenant's provider call report (fills in missed webhooks; every 15 min). */
+  "sync-calls": Record<string, never>;
   /** Copy a provider recording URL into Blob/R2. */
   "copy-recording": { tenantId: string; interactionId: string };
 }
@@ -32,13 +38,16 @@ export type JobName = keyof JobPayloads;
 export const JOB_NAMES = [
   "process-webhook",
   "assign-lead",
+  "import-batch",
   "relay-outbox",
   "deliver-webhook",
   "sweep-unassigned",
   "sweep-stuck-calls",
   "purge-expired",
   "recount-open-leads",
+  "callback-reminders",
   "copy-recording",
+  "sync-calls",
 ] as const satisfies readonly JobName[];
 
 export function isJobName(v: string): v is JobName {

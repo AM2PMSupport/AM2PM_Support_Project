@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repository.
 
 AM2PM Call Center CRM: a multi-client BPO CRM that replaces the per-client Google Sheets CRM (`crmv7.gs`). Calls, inbound and outbound, go through the provider's click-to-call API and webhooks; there is no SIP. Stack: Next.js on Vercel, Neon Postgres (Drizzle ORM, row-level security), Upstash QStash + Redis, Vercel Cron, Blob/R2, Auth.js. The product is in [PRD.md](PRD.md) and the system shape in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-**Current state:** backend foundation exists (see README "Repository layout"); no UI or sign-in yet. Unfinished work is marked `TODO(T<id>)` in code and `[~]` in [TASK.md](TASK.md). Keep both current.
+**Current state:** live on Vercel + Neon. Email/password sign-in with one login per person and a Zoho-style workspace switcher (SECURITY.md §3.1); Console, Leads (filters, saved filters, board, bulk actions), Floor and Setup (searchable grid) run on real data. Unfinished work is marked `TODO(T<id>)` in code and `[~]` in [TASK.md](TASK.md). Keep both current.
 
 ## Read before changing code
 
@@ -16,7 +16,7 @@ AM2PM Call Center CRM: a multi-client BPO CRM that replaces the per-client Googl
 | Tables, relations, RLS, API, events, screens | [DESIGN.md](DESIGN.md) and `lib/db/schema.ts` |
 | Flows, jobs, backup, security, cost | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Why something is the way it is | [MEMORIE.md](MEMORIE.md) decision log |
-| An API route or webhook | [API.md](API.md) — update it in the same change |
+| An API route, webhook or the GraphQL schema | [API.md](API.md) — update it in the same change. `tests/api-docs.test.ts` fails the build if a route/method is undocumented or §6.2 differs from `lib/graphql/schema.ts` |
 | Auth, secrets, isolation, PII | [SECURITY.md](SECURITY.md) |
 | Style, naming, structure, tests | [CODING_STANDARDS.md](CODING_STANDARDS.md) |
 
@@ -77,6 +77,7 @@ The Apps Script source is not in this folder; see [MEMORIE.md §6](MEMORIE.md#6-
 - Provider-specific work (e.g. Neon read replicas) via the provider CLI through `npx` (e.g. `npx neonctl`).
 - Only ask the owner when a step truly needs them: a browser OAuth approval, a billing approval, or a secret only they hold — and ask for that one action only.
 - Never print secrets: write them straight into `.env.local` and Vercel env vars.
+- Never commit or display `PASSWORD.md` (seeded role logins; git-ignored, mode 600).
 
 ## Vercel specifics
 
@@ -101,3 +102,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

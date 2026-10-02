@@ -230,6 +230,33 @@ describe("telephony: click-to-call webhooks (no SIP)", () => {
     expect(events.map((e) => e.t)).toEqual(["call.completed"]);
   });
 
+  it("outbound with CallerDesk's documented Call Report: matched by campid, completed with talk time", async () => {
+    const { callerDeskAdapter } = await import("@/lib/providers/telephony/callerdesk/adapter");
+    const { process, integration } = await seedTelephony(B);
+    const agent = await seedAgent(B, process.id, { agentPhone10: "9000000002", agentPhoneE164: "+919000000002" });
+    const { leadId } = await createOrMergeLead(B, process, { phoneKey: "9811113333", phoneE164: "+919811113333", custom: {} }, { kind: "manual" });
+    const correlationId = crypto.randomUUID();
+    await withTenant(B, (tx) =>
+      tx.insert(s.interactions).values({
+        type: "call", direction: "outbound", leadId, processId: process.id, agentId: agent.id, status: "initiated",
+        provider: "callerdesk", providerCallId: "8397411", correlationId, did: "07971544878", agentNumber: "9000000002", customerNumber: "+919811113333",
+      }),
+    );
+    // Exactly the documented payload shape (numbers changed): Source = agent, DialWhom = customer.
+    const events = callerDeskAdapter.parseWebhook(
+      {
+        type: "call_report", SourceNumber: "09000000002", DestinationNumber: "07971544878", DialWhomNumber: "09811113333",
+        CallDuration: "26", Status: "ANSWER", StartTime: "2024-12-30 12:43:19", EndTime: "2024-12-30 12:43:45", CallSid: "8397472",
+        Direction: "WEBOBD", campid: "8397411", TalkDuration: "14", LegA_Picked_time: "2024-12-30 12:43:27", LegB_Picked_time: "2024-12-30 12:43:31",
+        hangup_cause: "ANSWER(16-customer)",
+      },
+      { registeredDids: ["07971544878"] },
+    );
+    await applyCallEvents(B, integration, events);
+    const [call] = await withTenant(B, (tx) => tx.select().from(s.interactions).where(eq(s.interactions.correlationId, correlationId)));
+    expect(call).toMatchObject({ status: "completed", durationSec: 26 });
+  });
+
   it("inbound missed call: creates lead + missed call + ONE callback per lead per day", async () => {
     const { integration } = await seedTelephony(A);
     const at = new Date("2026-10-01T06:00:00Z");

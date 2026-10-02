@@ -70,4 +70,10 @@ export interface TelephonyAdapter {
   clickToCall(input: ClickToCallInput, creds: ProviderCredentials): Promise<ClickToCallResult>;
   verifyWebhook(req: Request, rawBody: string, secret: string | undefined): Promise<boolean>;
   parseWebhook(payload: Record<string, unknown>, ctx: { registeredDids: string[] }): NormalisedCallEvent[];
+  /**
+   * Optional: one page of the provider's call report (all calls of a day), as
+   * webhook-shaped payloads. Used to fill in calls whose webhooks never
+   * arrived (lib/telephony/sync.ts).
+   */
+  fetchCallReportPage?(creds: ProviderCredentials, q: { date: string; page: number }): Promise<{ rows: Record<string, unknown>[]; lastPage: boolean }>;
 }

@@ -6,6 +6,7 @@
  * handler with `handle()` so unknown errors become a safe 500 without a stack
  * trace leaking to the client.
  */
+import { ZodError, type ZodType, type z } from "zod";
 import { log } from "@/lib/log";
 
 export class ApiError extends Error {
@@ -33,8 +34,20 @@ export function errorResponse(err: unknown): Response {
   if (err instanceof ApiError) {
     return json({ error: { code: err.code, message: err.message } }, err.status);
   }
+  if (err instanceof ZodError) {
+    const i = err.issues[0];
+    return json({ error: { code: "invalid_input", message: `${i?.path.join(".") || "input"}: ${i?.message ?? "invalid"}` } }, 400);
+  }
   log.error("unhandled error", { err });
   return json({ error: { code: "internal", message: "Something went wrong" } }, 500);
+}
+
+/** Parse a JSON request body with a Zod schema (400 on bad JSON / invalid input). */
+export async function readJson<S extends ZodType>(req: Request, schema: S): Promise<z.output<S>> {
+  const raw: unknown = await req.json().catch(() => {
+    throw badRequest("Body must be JSON", "invalid_json");
+  });
+  return schema.parse(raw);
 }
 
 /** Wraps a route handler so thrown errors become the standard error shape. */

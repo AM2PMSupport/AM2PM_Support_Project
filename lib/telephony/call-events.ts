@@ -19,7 +19,7 @@
  *      After commit (never inside a transaction): Redis presence + call lock,
  *      publish the outbox, queue "copy-recording".
  */
-import { and, desc, eq, gte, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, notInArray, sql } from "drizzle-orm";
 import { callbacks, interactions, leads, processes, telephonyDids, users, type Integration, type Interaction } from "@/lib/db/schema";
 import { withTenant, type Tx } from "@/lib/db/tenant";
 import { localParts } from "@/lib/assignment/eligibility";
@@ -29,6 +29,7 @@ import { phoneKey, toE164, toTenDigits } from "@/lib/phone/phone";
 import { enqueue } from "@/lib/queue/qstash";
 import { keys, redis } from "@/lib/redis/client";
 import { releaseCallLock } from "@/lib/telephony/lock";
+import { isAllowedRecordingUrl } from "@/lib/telephony/recordings";
 import { nextInboundStatus, nextOutboundStatus, OUTBOUND_TERMINAL, wasConnected } from "@/lib/telephony/state-machine";
 import type { NormalisedCallEvent } from "@/lib/telephony/types";
 import type { InboundCallStatus, OutboundCallStatus } from "@/lib/db/schema";
@@ -36,7 +37,10 @@ import type { TenantContext } from "@/lib/tenancy/context";
 import { log } from "@/lib/log";
 
 /** How far back to look when matching an outbound webhook without ids. */
-const MATCH_WINDOW_MS = 15 * 60 * 1000;
+/** Number-based matching looks back this far from the event (long calls; synced reports). */
+const MATCH_WINDOW_MS = 3 * 60 * 60 * 1000;
+/** Calls a late real result may still match: open ones, plus the sweeper's / agent's "unknown". */
+const MATCHABLE_CLOSED = [...OUTBOUND_TERMINAL].filter((s) => s !== "unknown");
 const TERMINAL = new Set(["completed", "missed", "agent_no_answer", "busy", "no_answer", "failed"]);
 const PRESENCE_TTL = 4 * 60 * 60;
 
@@ -68,7 +72,9 @@ async function findCall(tx: Tx, provider: string, ev: NormalisedCallEvent): Prom
           eq(interactions.agentNumber, ev.agentNumber),
           eq(interactions.customerNumber, toE164(ev.customerNumber) ?? ev.customerNumber),
           gte(interactions.startedAt, new Date(ev.at.getTime() - MATCH_WINDOW_MS)),
-          notInArray(interactions.status, [...OUTBOUND_TERMINAL]),
+          lte(interactions.startedAt, new Date(ev.at.getTime() + 5 * 60_000)),
+          // A recording always arrives after the call ended, so it may match a finished call.
+          ev.kind === "recording_ready" ? undefined : notInArray(interactions.status, MATCHABLE_CLOSED),
         ),
       )
       .orderBy(desc(interactions.startedAt))
@@ -137,6 +143,14 @@ async function applyOne(ctx: TenantContext, integration: Integration, ev: Normal
   const found = call;
 
   if (ev.kind === "recording_ready" && ev.recordingUrl) {
+    // Already known (repeat webhook or the 15-min sync): only re-queue the copy
+    // if it never completed (e.g. the job failed); otherwise nothing to do.
+    if (found.recordingUrl === ev.recordingUrl) {
+      if (!found.recordingKey && isAllowedRecordingUrl(ev.recordingUrl)) {
+        await enqueue("copy-recording", { tenantId: ctx.tenantId, interactionId: found.id }, { deduplicationId: `rec:${found.id}` });
+      }
+      return;
+    }
     await withTenant(ctx, (tx) => tx.update(interactions).set({ recordingUrl: ev.recordingUrl }).where(eq(interactions.id, found.id)));
     await enqueue("copy-recording", { tenantId: ctx.tenantId, interactionId: found.id }, { deduplicationId: `rec:${found.id}` });
     return;

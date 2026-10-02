@@ -10,6 +10,11 @@ import { deliverWebhook } from "@/lib/events/deliver";
 import { processWebhook } from "@/lib/jobs/process-webhook";
 import { contextForTenantId } from "@/lib/platform-admin/tenants";
 import { purgeExpired, recountOpenLeads, relayOutbox, sweepStuckCalls, sweepUnassigned } from "@/lib/platform-admin/sweeps";
+import { runCallbackReminders } from "@/lib/platform-admin/reminders";
+import { runImportChunk } from "@/lib/imports/run";
+import { copyRecording } from "@/lib/telephony/recordings";
+import { syncCalls } from "@/lib/telephony/sync";
+import { tenantsWithTelephony } from "@/lib/platform-admin/tenants";
 import type { JobName, JobPayloads } from "@/lib/queue/jobs";
 import { log } from "@/lib/log";
 
@@ -25,6 +30,12 @@ export const handlers: Handlers = {
     const { ctx } = await contextForTenantId(tenantId);
     const res = await assignLead(ctx, leadId);
     log.info("assign-lead", { tenant: ctx.tenantSlug, outcome: res.outcome });
+  },
+
+  "import-batch": async ({ tenantId, batchId, offset }) => {
+    const { ctx } = await contextForTenantId(tenantId);
+    const res = await runImportChunk(ctx, batchId, offset);
+    log.info("import-batch", { tenant: ctx.tenantSlug, batchId, offset, done: res.done });
   },
 
   "deliver-webhook": async ({ tenantId, outboxId, subscriptionId }) => {
@@ -52,10 +63,25 @@ export const handlers: Handlers = {
     await recountOpenLeads();
   },
 
+  "callback-reminders": async () => {
+    log.info("callback-reminders", await runCallbackReminders());
+  },
+
+  "sync-calls": async () => {
+    for (const t of await tenantsWithTelephony()) {
+      const { ctx } = await contextForTenantId(t);
+      try {
+        const r = await syncCalls(ctx);
+        log.info("sync-calls", { tenant: ctx.tenantSlug, rows: r?.rows ?? 0, failed: r?.failed ?? 0 });
+      } catch (err) {
+        log.error("sync-calls failed", { tenant: ctx.tenantSlug, err }); // next run retries; one tenant can't block the rest
+      }
+    }
+  },
+
   "copy-recording": async ({ tenantId, interactionId }) => {
-    // TODO(T1.39): stream interactions.recording_url into Blob/R2 at
-    // recordings/{tenantSlug}/{yyyy}/{mm}/{interactionId}.mp3, set
-    // interactions.recording_key, and never expose the provider URL.
-    log.warn("copy-recording not implemented yet", { tenantId, interactionId });
+    const { ctx } = await contextForTenantId(tenantId);
+    const r = await copyRecording(ctx, interactionId);
+    log.info("copy-recording", { tenant: ctx.tenantSlug, result: r });
   },
 };

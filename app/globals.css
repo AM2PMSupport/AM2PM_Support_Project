@@ -106,6 +106,18 @@
   background: currentColor;
   animation: pulse-ring 1.8s ease-out infinite;
 }
+/* Loading placeholders (app/(app)/loading.tsx). */
+@keyframes skeleton-fade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.skeleton {
+  display: block;
+  border-radius: 4px;
+  background: var(--color-rule);
+  animation: skeleton-fade 1.4s ease-in-out infinite;
+}
 @media (prefers-reduced-motion: reduce) {
   .live-dot::after { animation: none; }
+  .skeleton { animation: none; }
 }

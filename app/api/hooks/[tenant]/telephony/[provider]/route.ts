@@ -6,12 +6,15 @@
  * Verify with the provider adapter → store → queue → 200. The call logic runs
  * in the "process-webhook" job (lib/telephony/call-events.ts).
  * GET is accepted too because some providers send call events as GET.
+ * The secret may be in the path (…/{provider}/{key}, see ./[key]/route.ts)
+ * or in ?key= (older URLs).
  */
 import { and, eq } from "drizzle-orm";
 import { integrations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
-import { handle, json, notFound, unauthorized } from "@/lib/http/errors";
+import { ApiError, handle, json, notFound, unauthorized } from "@/lib/http/errors";
+import { log } from "@/lib/log";
 import { tenantBySlug } from "@/lib/platform-admin/tenants";
 import { telephonyAdapter } from "@/lib/telephony/registry";
 import { systemContext } from "@/lib/tenancy/context";
@@ -35,8 +38,33 @@ async function receive(req: Request, { params }: Ctx): Promise<Response> {
   if (!integration) throw notFound();
 
   const rawBody = req.method === "GET" ? "" : await req.text();
-  const secret = integration.webhookSecretEnc ? decrypt(integration.webhookSecretEnc) : undefined;
-  if (!(await adapter.verifyWebhook(req, rawBody, secret))) throw unauthorized("Invalid webhook signature");
+  let secret: string | undefined;
+  try {
+    secret = integration.webhookSecretEnc ? decrypt(integration.webhookSecretEnc) : undefined;
+  } catch {
+    // Saved with a different MASTER_ENCRYPTION_KEY (e.g. configured from another environment).
+    log.error("telephony webhook secret unreadable — MASTER_ENCRYPTION_KEY mismatch; reconnect telephony in Setup", { tenant: slug, provider });
+    throw new ApiError(503, "secret_unreadable", "Webhook secret can't be read; reconnect telephony in Setup");
+  }
+  if (!(await adapter.verifyWebhook(req, rawBody, secret))) {
+    // Explain the rejection without logging the key itself.
+    const url = new URL(req.url);
+    const pathTail = url.pathname.split(`/telephony/${provider}/`)[1] ?? "";
+    const presented = pathTail || (url.searchParams.get("key") ?? "");
+    log.warn("telephony webhook rejected", {
+      tenant: slug,
+      provider,
+      method: req.method,
+      // Field names avoid "key"/"secret" so the log redactor keeps them (values are lengths only).
+      presentedVia: pathTail ? "path" : url.searchParams.has("key") ? "query" : "missing",
+      presentedChars: presented.length,
+      expectedChars: secret?.length ?? 0,
+      maskedCopied: presented.includes("•") || presented.includes("%E2%80%A2") || presented.includes("[hidden]"),
+      contentType: req.headers.get("content-type") ?? "",
+      fields: Object.keys(parseWebhookBody(req, rawBody)).slice(0, 25),
+    });
+    throw unauthorized("Invalid webhook signature");
+  }
 
   const payload = parseWebhookBody(req, rawBody);
   const { duplicate } = await receiveWebhook({

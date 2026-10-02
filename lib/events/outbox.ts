@@ -13,6 +13,7 @@
  *
  * Delivery is at-least-once; receivers dedupe on the stable event id.
  */
+import { after } from "next/server";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { outbox, webhookSubscriptions, type OutboxEvent, type WebhookSubscription } from "@/lib/db/schema";
 import { withTenant, type Tx } from "@/lib/db/tenant";
@@ -79,5 +80,21 @@ export async function publishOutboxSafely(ctx: TenantContext, outboxIds: string[
     await publishOutbox(ctx, outboxIds);
   } catch (err) {
     log.warn("outbox publish deferred to relay", { tenant: ctx.tenantSlug, err });
+  }
+}
+
+/**
+ * For user-facing actions (save outcome, change stage): publish AFTER the
+ * response is sent (next/server `after`, which Vercel keeps alive with
+ * waitUntil), so the agent never waits on QStash. The rows are already
+ * committed; if this publish fails, the relay sweep sends them. Outside a
+ * request (jobs, tests) `after` is unavailable, so publish inline.
+ */
+export async function publishOutboxAfterResponse(ctx: TenantContext, outboxIds: string[]): Promise<void> {
+  if (!outboxIds.length) return;
+  try {
+    after(() => publishOutboxSafely(ctx, outboxIds));
+  } catch {
+    await publishOutboxSafely(ctx, outboxIds);
   }
 }

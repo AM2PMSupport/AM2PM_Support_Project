@@ -1,0 +1,2 @@
+CREATE INDEX "interactions_calls" ON "interactions" USING btree ("tenant_id","started_at") WHERE "interactions"."type" = 'call';--> statement-breakpoint
+CREATE INDEX "interactions_agent_calls" ON "interactions" USING btree ("tenant_id","agent_id","started_at") WHERE "interactions"."type" = 'call';

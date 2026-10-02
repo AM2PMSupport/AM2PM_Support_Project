@@ -24,6 +24,7 @@ export function redis(): Redis {
 export const keys = {
   /** Held while an agent has a live call; blocks a second click-to-call. */
   callActive: (tenantId: string, userId: string) => `t:${tenantId}:call:active:${userId}`,
+  callsSync: (tenantId: string) => `t:${tenantId}:calls:last_sync`,
   /** Agent presence: available | on_call | wrap_up | offline. */
   presence: (tenantId: string, userId: string) => `t:${tenantId}:presence:${userId}`,
   /** Cached eligible agents for a process (30 s). */

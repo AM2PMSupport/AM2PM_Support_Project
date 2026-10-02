@@ -22,7 +22,7 @@ function qstash(): Client {
 export interface EnqueueOptions {
   /** Seconds to wait before first delivery (e.g. callback reminders). */
   delaySeconds?: number;
-  /** QStash drops a second publish with the same id (10-min window). */
+  /** QStash drops a second publish with the same id (10-min window). Any ":" is replaced (QStash rejects it). */
   deduplicationId?: string;
   /** Default 5 retries with QStash's exponential backoff. */
   retries?: number;
@@ -34,9 +34,14 @@ export async function enqueue<J extends JobName>(job: J, payload: JobPayloads[J]
     body: payload,
     retries: opts.retries ?? 5,
     delay: opts.delaySeconds,
-    deduplicationId: opts.deduplicationId,
+    deduplicationId: dedupeId(opts.deduplicationId),
   });
   return res.messageId;
+}
+
+/** QStash returns 400 "DeduplicationId cannot contain ':'" — callers use "kind:id" freely, so normalise here. */
+export function dedupeId(id: string | undefined): string | undefined {
+  return id?.replace(/[^A-Za-z0-9._-]/g, "-");
 }
 
 /** Throws if the request did not come from QStash. Pass the RAW body text. */

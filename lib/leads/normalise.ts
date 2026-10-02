@@ -59,9 +59,10 @@ export function normaliseLead(raw: Record<string, unknown>, fieldMap: Record<str
 
 /** Sensible defaults when a source has no explicit field map yet. */
 function guessTarget(key: string): string | undefined {
-  const k = key.toLowerCase();
-  if (/^(name|full_?name|customer_?name)$/.test(k)) return "name";
-  if (/(phone|mobile|contact_?no|whatsapp)/.test(k)) return "phone";
-  if (/e-?mail/.test(k)) return "email";
+  // Spreadsheet headers: "Full Name", "Mobile No.", "Email ID", "contact-number".
+  const k = key.toLowerCase().trim().replace(/[\s\-.]+/g, "_").replace(/_+$/, "");
+  if (/^(name|full_?name|(customer|lead|contact|client)_?name)$/.test(k)) return "name";
+  if (/(phone|mobile|contact_?no|contact_?number|whatsapp|^cell|^number$)/.test(k)) return "phone";
+  if (/e_?mail/.test(k)) return "email";
   return undefined;
 }

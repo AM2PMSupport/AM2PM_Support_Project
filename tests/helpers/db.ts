@@ -55,5 +55,13 @@ export function fakeRedis() {
     async del(key: string) {
       return store.delete(key) ? 1 : 0;
     },
+    async incr(key: string) {
+      const n = Number(store.get(key) ?? 0) + 1;
+      store.set(key, n);
+      return n;
+    },
+    async expire() {
+      return 1;
+    },
   };
 }

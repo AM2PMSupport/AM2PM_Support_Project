@@ -10,7 +10,9 @@
  *
  * No row back = a duplicate → merge (bump last_enquiry_at, log "merged").
  * Created → lead_events(created) + outbox(lead.created) in the SAME
- * transaction, then an "assign-lead" job is queued after commit.
+ * transaction, then an "assign-lead" job is queued after commit — unless
+ * the caller assigns inline (bulk imports: one QStash message per chunk,
+ * not per lead).
  */
 import { and, eq, or, sql } from "drizzle-orm";
 import { contacts, leadEvents, leads, type LeadSourceInfo, type Process } from "@/lib/db/schema";
@@ -18,6 +20,7 @@ import { withTenant, type Tx } from "@/lib/db/tenant";
 import { publishOutboxSafely, writeOutbox } from "@/lib/events/outbox";
 import type { NormalisedLead } from "@/lib/leads/normalise";
 import { enqueue } from "@/lib/queue/qstash";
+import { notify } from "@/lib/notifications";
 import type { TenantContext } from "@/lib/tenancy/context";
 
 export type CreateLeadResult = { outcome: "created"; leadId: string } | { outcome: "merged"; leadId: string };
@@ -58,6 +61,7 @@ export async function createOrMergeLead(
   process: Pick<Process, "id" | "stages" | "dedupeField">,
   lead: NormalisedLead,
   source: LeadSourceInfo,
+  opts: { queueAssign?: boolean } = {},
 ): Promise<CreateLeadResult> {
   const value = dedupeValue(process, lead);
   // No dedupe value (e.g. email-only lead on a phone-deduped process): never collides.
@@ -93,16 +97,25 @@ export async function createOrMergeLead(
       .update(leads)
       .set({ lastEnquiryAt: now })
       .where(and(eq(leads.processId, process.id), eq(leads.dedupeKey, dedupeKey), eq(leads.isActive, true)))
-      .returning({ id: leads.id });
+      .returning({ id: leads.id, assignedTo: leads.assignedTo });
     if (!existing) throw new Error("dedupe conflict but no active lead found"); // retried by the job
     await tx.insert(leadEvents).values({ leadId: existing.id, type: "merged", actor: { kind: "source", name: source.kind }, after: { source } });
-    // TODO(T1.21): alert the owner ("re-enquired from <source>") via notifications.
+    if (existing.assignedTo) {
+      await notify(tx, [existing.assignedTo], {
+        kind: "lead_merged",
+        title: `${lead.name ?? "A lead"} enquired again`,
+        body: `New enquiry from ${source.kind.replace(/_/g, " ")} — call while they're interested`,
+        link: `/console?lead=${existing.id}`,
+      });
+    }
     return { outcome: "merged" as const, leadId: existing.id, outboxId: undefined };
   });
 
   if (result.outcome === "created") {
     await publishOutboxSafely(ctx, [result.outboxId]);
-    await enqueue("assign-lead", { tenantId: ctx.tenantId, leadId: result.leadId }, { deduplicationId: `assign:${result.leadId}` });
+    if (opts.queueAssign !== false) {
+      await enqueue("assign-lead", { tenantId: ctx.tenantId, leadId: result.leadId }, { deduplicationId: `assign:${result.leadId}` });
+    }
   }
   return { outcome: result.outcome, leadId: result.leadId };
 }

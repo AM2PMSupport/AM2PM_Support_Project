@@ -24,6 +24,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -130,6 +131,29 @@ export const tenants = pgTable("tenants", {
   ...timestamps,
 });
 
+/**
+ * A person's ONE login across workspaces (Zoho-style org switching).
+ * Platform-level: no tenant_id, and the RLS role app_rls has NO access
+ * (drizzle/0007) — only lib/platform-admin reads or writes it. Each
+ * workspace membership is a `users` row pointing here (role per workspace).
+ */
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: id(),
+    /** Always stored lower-cased. */
+    email: text("email").notNull(),
+    /** scrypt hash (lib/auth/password.ts). Null = cannot sign in yet. */
+    passwordHash: text("password_hash"),
+    passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    /** Workspace to open after sign-in (the last one used). */
+    lastTenantId: uuid("last_tenant_id").references(() => tenants.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("accounts_email").on(t.email)],
+);
+
 export const users = pgTable(
   "users",
   {
@@ -152,10 +176,21 @@ export const users = pgTable(
     dailyQuota: integer("daily_quota"),
     isAvailable: boolean("is_available").notNull().default(false),
     status: text("status").$type<"active" | "inactive" | "locked">().notNull().default("active"),
+    /** The person's login (accounts). One membership per workspace. */
+    accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
+    /** @deprecated Moved to accounts.password_hash in 0007; kept until the column is dropped. */
+    passwordHash: text("password_hash"),
+    passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     ...timestamps,
   },
   (t) => [
     uniqueIndex("users_tenant_email").on(t.tenantId, t.email),
+    // One membership per person per workspace; "my workspaces" lookup.
+    uniqueIndex("users_tenant_account").on(t.tenantId, t.accountId),
+    index("users_account").on(t.accountId),
+    // Sign-in looks a user up by email before the tenant is known (platform-level).
+    index("users_email").on(t.email),
     // Inbound calls: find the agent whose phone answered.
     index("users_tenant_phone10").on(t.tenantId, t.agentPhone10),
   ],
@@ -302,10 +337,14 @@ export const leads = pgTable(
     dedupeKey: text("dedupe_key").notNull(),
     /** false frees the dedupe key (closed + re-enquiry window passed). */
     isActive: boolean("is_active").notNull().default(true),
+    /** Recycle bin: set by Delete (is_active goes false too); cleared by Restore. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by"),
     custom: jsonb("custom").$type<Record<string, unknown>>().notNull().default({}),
     ...timestamps,
   },
   (t) => [
+    index("leads_recycle_bin").on(t.tenantId, t.deletedAt).where(sql`${t.deletedAt} is not null`),
     // Dedupe: racing imports cannot create two active leads (ON CONFLICT → merge).
     uniqueIndex("leads_dedupe_active").on(t.tenantId, t.processId, t.dedupeKey).where(sql`${t.isActive}`),
     index("leads_owner_callback").on(t.tenantId, t.assignedTo, t.nextCallbackAt),
@@ -325,7 +364,7 @@ export const leadEvents = pgTable(
     tenantId: tenantId(),
     leadId: uuid("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
     type: text("type")
-      .$type<"created" | "merged" | "assigned" | "reassigned" | "stage_changed" | "disposition_set" | "callback_set" | "converted" | "lost" | "restored">()
+      .$type<"created" | "merged" | "assigned" | "reassigned" | "stage_changed" | "disposition_set" | "callback_set" | "converted" | "lost" | "restored" | "edited" | "deleted">()
       .notNull(),
     actor: jsonb("actor").$type<{ kind: "user" | "system" | "source"; id?: string; name?: string }>().notNull(),
     before: jsonb("before").$type<Record<string, unknown>>(),
@@ -394,6 +433,9 @@ export const interactions = pgTable(
       .on(t.tenantId, t.provider, t.providerCallId)
       .where(sql`${t.providerCallId} is not null`),
     index("interactions_lead").on(t.tenantId, t.leadId, t.startedAt),
+    // Calls log: all calls newest first, and an agent's own calls.
+    index("interactions_calls").on(t.tenantId, t.startedAt).where(sql`${t.type} = 'call'`),
+    index("interactions_agent_calls").on(t.tenantId, t.agentId, t.startedAt).where(sql`${t.type} = 'call'`),
     // Quick call lookup: caller history / screen-pop by customer number.
     index("interactions_customer").on(t.tenantId, t.customerNumber, t.startedAt),
     // Webhook fallback match: this agent's latest call to this customer.
@@ -537,6 +579,174 @@ export const auditLogs = pgTable(
   (t) => [index("audit_logs_tenant_created").on(t.tenantId, t.createdAt), index("audit_logs_entity").on(t.tenantId, t.entity, t.entityId)],
 );
 
+// ------------------------------------------------------------------ Phase 1 additions
+
+/** Teams of agents under a leader, per process. Members live in team_members. */
+export const teams = pgTable(
+  "teams",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text("name").notNull(),
+    processId: uuid("process_id").references(() => processes.id, { onDelete: "set null" }),
+    leaderId: uuid("leader_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("teams_tenant_name").on(t.tenantId, t.name)],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    tenantId: tenantId(),
+    teamId: uuid("team_id").notNull().references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index("team_members_user").on(t.tenantId, t.userId)],
+);
+
+export type CustomFieldType = "text" | "number" | "dropdown" | "multiselect" | "date" | "boolean" | "phone" | "email";
+
+/** Per-tenant (optionally per-process) custom field definitions; values live in `custom` JSONB. */
+export const customFieldDefinitions = pgTable(
+  "custom_field_definitions",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    entity: text("entity").$type<"lead" | "contact">().notNull(),
+    processId: uuid("process_id").references(() => processes.id, { onDelete: "cascade" }),
+    /** Immutable machine key, stored inside `custom`. */
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    type: text("type").$type<CustomFieldType>().notNull(),
+    options: text("options").array().notNull().default(sql`'{}'::text[]`),
+    required: boolean("required").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [unique("custom_fields_key").on(t.tenantId, t.entity, t.processId, t.key).nullsNotDistinct()],
+);
+
+/** In-app notifications: callback due, missed call, lead re-enquired, SLA breach, digest. */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"callback_due" | "callback_missed" | "lead_merged" | "sla_breach" | "lead_assigned" | "missed_call" | "system">().notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    link: text("link"),
+    /** Dedupe key so a reminder is created once (e.g. "cb-due:<callbackId>"). */
+    dedupeKey: text("dedupe_key"),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("notifications_inbox").on(t.tenantId, t.userId, t.readAt, t.createdAt),
+    uniqueIndex("notifications_dedupe").on(t.tenantId, t.dedupeKey).where(sql`${t.dedupeKey} is not null`),
+  ],
+);
+
+/**
+ * API keys for the REST + GraphQL API (T2.5): integrations and client CRMs.
+ * A key acts AS the user who created it (same role, scope and audit trail).
+ * Only the SHA-256 of the key is stored; the key is shown once. `prefix` is
+ * the first characters, kept to recognise a key in the list.
+ */
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    /** "read" = GET + GraphQL queries; "write" = also creates/updates/deletes. */
+    scope: text("scope").$type<"read" | "write">().notNull().default("read"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("api_keys_hash").on(t.keyHash), index("api_keys_tenant").on(t.tenantId, t.createdAt)],
+);
+
+/**
+ * Saved list filters ("Meta leads", "My overdue callbacks"). Personal, or
+ * shared with the whole workspace. `query` is the Leads screen's URL
+ * search params (validated by lib/leads/list.ts on use).
+ */
+export const savedViews = pgTable(
+  "saved_views",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    module: text("module").$type<"leads">().notNull().default("leads"),
+    name: text("name").notNull(),
+    query: jsonb("query").$type<Record<string, string>>().notNull().default({}),
+    shared: boolean("shared").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("saved_views_owner").on(t.tenantId, t.module, t.userId)],
+);
+
+/** One CSV upload or scheduled sheet pull. */
+export const importBatches = pgTable(
+  "import_batches",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    sourceId: uuid("source_id").references(() => importSources.id, { onDelete: "set null" }),
+    processId: uuid("process_id").notNull().references(() => processes.id),
+    fileName: text("file_name"),
+    fileKey: text("file_key"),
+    total: integer("total").notNull().default(0),
+    inserted: integer("inserted").notNull().default(0),
+    merged: integer("merged").notNull().default(0),
+    failed: integer("failed").notNull().default(0),
+    /** First 200 row errors: [{ row, reason }]. */
+    errors: jsonb("errors").$type<{ row: number; reason: string }[]>().notNull().default([]),
+    status: text("status").$type<"queued" | "running" | "done" | "failed">().notNull().default("queued"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("import_batches_recent").on(t.tenantId, t.createdAt)],
+);
+
+/** Per-tenant backup schedule and retention (ARCHITECTURE.md §7). */
+export const backupPolicies = pgTable("backup_policies", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .default(sql`current_setting('app.tenant_id', true)::uuid`)
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  keepDaily: integer("keep_daily").notNull().default(7),
+  keepWeekly: integer("keep_weekly").notNull().default(4),
+  keepMonthly: integer("keep_monthly").notNull().default(3),
+  allowClientDownload: boolean("allow_client_download").notNull().default(false),
+  updatedAt: timestamps.updatedAt,
+});
+
+export const backupSnapshots = pgTable(
+  "backup_snapshots",
+  {
+    id: id(),
+    tenantId: tenantId(),
+    trigger: text("trigger").$type<"cron" | "manual" | "pre_restore">().notNull(),
+    status: text("status").$type<"running" | "completed" | "failed">().notNull().default("running"),
+    /** { table: { rows, bytes, sha256, key } } */
+    files: jsonb("files").$type<Record<string, { rows: number; bytes: number; sha256: string; key: string }>>().notNull().default({}),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("backup_snapshots_recent").on(t.tenantId, t.startedAt)],
+);
+
 // ------------------------------------------------------------------ row types
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -548,7 +758,16 @@ export type Contact = typeof contacts.$inferSelect;
 export type ImportSource = typeof importSources.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
 export type Interaction = typeof interactions.$inferSelect;
+export type LeadEvent = typeof leadEvents.$inferSelect;
+export type Account = typeof accounts.$inferSelect;
+export type SavedView = typeof savedViews.$inferSelect;
+export type ApiKey = typeof apiKeys.$inferSelect;
 export type Callback = typeof callbacks.$inferSelect;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type OutboxEvent = typeof outbox.$inferSelect;
 export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect;
+export type Team = typeof teams.$inferSelect;
+export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
+export type ImportBatch = typeof importBatches.$inferSelect;
+export type Disposition = typeof dispositions.$inferSelect;

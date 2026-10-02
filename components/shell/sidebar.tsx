@@ -3,36 +3,58 @@
 /**
  * Left rail. Ink background so the paper workspace reads as the "desk".
  * Bottom: the agent's own status switch — the single most-used control in a
- * call center, so it lives here, always visible.
+ * call center, so it lives here, always visible. The avatar (and the
+ * workspace badge under the logo) open the profile panel with the
+ * workspace switcher.
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { BarChart3, Headset, Settings2, UsersRound } from "lucide-react";
+import { AudioLines, BarChart3, Headset, Settings2, UsersRound } from "lucide-react";
 import { LogoMark } from "@/components/ui/logo";
-import { ME, type AgentStatus } from "@/lib/ui/sample-data";
+import type { AgentStatus } from "@/lib/ui/sample-data";
 import { STATUS_META } from "@/lib/ui/status";
+import { ProfileMenu, workspaceInitials } from "@/components/shell/profile-menu";
 
 const NAV = [
-  { href: "/console", label: "Console", icon: Headset },
-  { href: "/leads", label: "Leads", icon: UsersRound },
-  { href: "/dashboard", label: "Floor", icon: BarChart3 },
-  { href: "/admin", label: "Setup", icon: Settings2 },
-];
+  { key: "console", href: "/console", label: "Console", icon: Headset },
+  { key: "leads", href: "/leads", label: "Leads", icon: UsersRound },
+  { key: "calls", href: "/calls", label: "Calls", icon: AudioLines },
+  { key: "dashboard", href: "/dashboard", label: "Floor", icon: BarChart3 },
+  { key: "admin", href: "/admin", label: "Setup", icon: Settings2 },
+] as const;
 
 
-export function Sidebar() {
+export function Sidebar({
+  user,
+  workspace,
+  nav,
+  canTakeCalls,
+}: {
+  user: { name: string; initials: string; roleLabel: string };
+  workspace: string;
+  nav: readonly string[];
+  canTakeCalls: boolean;
+}) {
   const path = usePathname();
   const [status, setStatus] = useState<AgentStatus>("available");
+  const [menu, setMenu] = useState(false);
 
   return (
     <aside className="sticky top-0 flex h-dvh w-[76px] shrink-0 flex-col items-center border-r border-black/40 bg-ink py-4 text-sheet">
-      <Link href="/console" aria-label="AM2PM CRM home" className="mb-7">
+      <Link href="/console" aria-label="AM2PM CRM home" className="mb-3">
         <LogoMark size={30} />
       </Link>
+      <button
+        onClick={() => setMenu(true)}
+        title={`Workspace: ${workspace} — click to switch`}
+        className="mb-6 flex h-7 min-w-[44px] items-center justify-center rounded-md border border-white/15 px-1.5 font-mono text-[10.5px] font-semibold tracking-wide text-teal hover:border-teal/60"
+      >
+        {workspaceInitials(workspace)}
+      </button>
 
       <nav className="flex flex-1 flex-col gap-1">
-        {NAV.map(({ href, label, icon: Icon }) => {
+        {NAV.filter((n) => nav.includes(n.key)).map(({ href, label, icon: Icon }) => {
           const active = path.startsWith(href);
           return (
             <Link
@@ -51,11 +73,17 @@ export function Sidebar() {
       </nav>
 
       <div className="flex flex-col items-center gap-3">
-        <label className="group relative flex cursor-pointer flex-col items-center gap-1 text-[10px] text-ink-4">
-          <span className="relative flex h-[34px] w-[34px] items-center justify-center rounded-full bg-white/10 text-[12px] font-semibold text-sheet">
-            {ME.initials}
+        <div className="group relative flex flex-col items-center gap-1 text-[10px] text-ink-4">
+          <button
+            onClick={() => setMenu(true)}
+            aria-label="Profile and workspaces"
+            title={`${user.name} · ${user.roleLabel} · ${workspace}`}
+            className="relative flex h-[34px] w-[34px] items-center justify-center rounded-full bg-white/10 text-[12px] font-semibold text-sheet hover:bg-white/20"
+          >
+            {user.initials}
             <span className={`absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-ink ${STATUS_META[status].dot}`} />
-          </span>
+          </button>
+          {canTakeCalls ? (
           <select
             aria-label="My status"
             value={status}
@@ -68,8 +96,12 @@ export function Sidebar() {
               </option>
             ))}
           </select>
-        </label>
+          ) : (
+            <span className="w-[64px] truncate text-center text-[10.5px]">{user.roleLabel}</span>
+          )}
+        </div>
       </div>
+      {menu && <ProfileMenu user={user} workspace={workspace} onClose={() => setMenu(false)} />}
     </aside>
   );
 }

@@ -5,9 +5,11 @@
  * sample-data marker. The clock is the brand motif made useful: agents work
  * shifts and callbacks are booked in IST.
  */
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { Kbd } from "@/components/ui/primitives";
+import { NotificationsBell } from "@/components/shell/notifications-bell";
 
 function useIstClock() {
   const [now, setNow] = useState<Date | null>(null);
@@ -35,7 +37,44 @@ export function ShiftClock() {
   );
 }
 
-export function Topbar({ title, subtitle }: { title: string; subtitle?: string }) {
+function TopSearch() {
+  const router = useRouter();
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  // "/" focuses search from anywhere (unless typing in a field).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "/" || (e.target as HTMLElement).closest("input,textarea,select")) return;
+      e.preventDefault();
+      (document.getElementById("leads-search") as HTMLInputElement | null)?.focus() ?? ref.current?.focus();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (q.trim()) router.push(`/leads?q=${encodeURIComponent(q.trim())}&status=all`);
+      }}
+      className="ml-auto flex h-9 w-full max-w-[380px] items-center gap-2 rounded-md border border-rule bg-sheet px-3 text-ink-3 focus-within:border-ink"
+    >
+      <Search size={15} strokeWidth={1.8} />
+      <input
+        ref={ref}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Name, last 4 digits, or email"
+        aria-label="Search leads"
+        className="h-full flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-4"
+      />
+      <Kbd>/</Kbd>
+    </form>
+  );
+}
+
+/** `search={false}` on screens that have their own search (Leads), so there is one box, not two. */
+export function Topbar({ title, subtitle, sample = false, search = true }: { title: string; subtitle?: string; sample?: boolean; search?: boolean }) {
   return (
     <header className="sticky top-0 z-20 flex h-[60px] items-center gap-6 border-b border-rule bg-paper/95 px-6 backdrop-blur-[2px]">
       <div className="min-w-0">
@@ -43,23 +82,17 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
         {subtitle && <p className="truncate text-[12px] text-ink-3">{subtitle}</p>}
       </div>
 
-      <label className="ml-auto flex h-9 w-full max-w-[380px] items-center gap-2 rounded-md border border-rule bg-sheet px-3 text-ink-3 focus-within:border-ink">
-        <Search size={15} strokeWidth={1.8} />
-        <input
-          placeholder="Name, last 4 digits, or email"
-          className="h-full flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-4"
-        />
-        <Kbd>/</Kbd>
-      </label>
+      {search ? <TopSearch /> : <div className="flex-1" />}
 
+      <NotificationsBell />
       <ShiftClock />
 
-      <span
+      {sample && <span
         title="Screens show fictional sample data until sign-in (TASK.md T1.11) connects them to live data."
         className="hidden items-center gap-1.5 rounded-sm border border-dashed border-ember/60 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ember-ink lg:inline-flex"
       >
         Sample data
-      </span>
+      </span>}
     </header>
   );
 }

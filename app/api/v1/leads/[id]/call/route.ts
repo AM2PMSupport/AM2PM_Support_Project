@@ -8,15 +8,15 @@
  * 409 already_on_call · 403 dnc / not your lead · 422 setup missing ·
  * 502 provider rejected (message is safe to show the agent).
  */
-import { requireSession } from "@/lib/auth/session";
 import { isUuid } from "@/lib/db/tenant";
-import { badRequest, handle, json } from "@/lib/http/errors";
+import { badRequest, json } from "@/lib/http/errors";
+import { v1 } from "@/lib/api/v1";
 import { placeCall } from "@/lib/telephony/click-to-call";
 
-export const POST = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
-  const ctx = await requireSession(req);
-  const { id } = await params;
-  if (!isUuid(id)) throw badRequest("Invalid lead id");
-  const result = await placeCall(ctx, id);
-  return json(result, 202);
-});
+export const POST = v1<{ id: string }>(
+  async (_req, ctx, { id }) => {
+    if (!isUuid(id)) throw badRequest("Invalid lead id");
+    return json(await placeCall(ctx, id), 202);
+  },
+  { write: true },
+);

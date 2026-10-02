@@ -39,7 +39,7 @@ outbox ··< webhook_deliveries >─ webhook_subscriptions   (event_id: no FK, o
 ```
 
 ### Tenant isolation (row-level security)
-- Tenant code runs inside `withTenant(ctx, fn)`: one transaction that does `set_config('app.tenant_id', …, true)` and `SET LOCAL ROLE app_rls`.
+- Tenant code runs inside `withTenant(ctx, fn)`: one transaction whose first statement is `select set_config('app.tenant_id', …, true), set_config('role', 'app_rls', true)` (the second is `SET LOCAL ROLE app_rls`; one statement saves a round trip on every transaction).
 - `app_rls` has no BYPASSRLS. Policy on every tenant table: `USING/WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)`.
 - `tenants`: `app_rls` may only SELECT its own row. `audit_logs`: `app_rls` may INSERT/SELECT only.
 - `lib/platform-admin` uses the owner connection (not subject to RLS) for cross-tenant sweeps.
@@ -50,9 +50,12 @@ outbox ··< webhook_deliveries >─ webhook_subscriptions   (event_id: no FK, o
 
 **tenants** (global): name, slug (unique, used in webhook URLs), status (active, trial, suspended, closed), timezone (default Asia/Kolkata), currency, settings jsonb.
 
-**users**
+**accounts** (global, platform-only — app role has no access): one login per person. email (unique, lower-cased), password_hash (scrypt), password_changed_at, last_login_at, last_tenant_id (workspace opened after sign-in). See SECURITY.md §3.1.
+
+**users** — a person's *membership* in one workspace (role per workspace)
 | Column | Notes |
 | --- | --- |
+| account_id | FK accounts; unique (tenant_id, account_id); index (account_id) for "my workspaces" |
 | email, name | unique (tenant_id, email) |
 | role | super_admin, admin, project_supervisor, manager, process_coordinator, trainer, client, agent |
 | agent_phone_e164, agent_phone_10, agent_phone_verified_at | the phone that rings for click-to-call and inbound (crmv7 roster "Agent Phone"); index (tenant_id, agent_phone_10) for inbound matching |
@@ -64,6 +67,7 @@ outbox ··< webhook_deliveries >─ webhook_subscriptions   (event_id: no FK, o
 | daily_quota | Number method |
 | is_available | mirrored in Redis presence |
 | status | active, inactive, locked |
+| password_hash, password_changed_at, last_login_at | scrypt hash (never plain text); index on `email` for sign-in lookup across workspaces |
 
 **user_processes** (M:N): user_id, process_id — mapping an agent here grants access to that process's leads.
 
@@ -93,6 +97,7 @@ outbox ··< webhook_deliveries >─ webhook_subscriptions   (event_id: no FK, o
 | source jsonb, import_source_id | { kind, sourceId, batchId, campaign, adId, formId } |
 | stage, status | status open \| won \| lost \| dnc |
 | assigned_to, assigned_at | FK users |
+| deleted_at, deleted_by | Recycle bin (soft delete, leads **D**): is_active=false frees the dedupe key, pending callbacks cancelled, owner capacity released; Restore refused if another open lead now holds the key. Partial index (tenant_id, deleted_at) WHERE deleted_at IS NOT NULL |
 | attempts, last_disposition jsonb | |
 | last_interaction_at, next_callback_at, last_enquiry_at, converted_at | queues and SLAs |
 | dedupe_key, is_active | unique (tenant_id, process_id, dedupe_key) WHERE is_active |
@@ -105,6 +110,8 @@ Other indexes: (tenant_id, assigned_to, next_callback_at); (tenant_id, process_i
 **import_sources**: kind (web_form, meta_ads, google_ads, indiamart, justdial, csv, sheet, api), process_id, field_map jsonb, secret_hash (SHA-256; key shown once), status, last_lead_at.
 
 **assignment_state** (PK process_id): seq, smooth_weights jsonb, day, daily_counts jsonb. Locked `FOR UPDATE` while assigning.
+
+**saved_views**: user_id, module ('leads'), name, query jsonb (the Leads screen URL params), shared (visible to the whole workspace; admins only). Index (tenant_id, module, user_id).
 
 ### 2.3 Activity
 
@@ -336,6 +343,8 @@ Scopes applied in queries: `own` (assigned_to = me) · `team` (assigned_to ∈ m
 
 Legend: V view · C create · E edit · D delete · A approve · X export.
 
+Reassigning leads (bulk "Assign to…", choosing an owner on Create Lead) = `E` on leads **and** a scope wider than own (`canReassign()` in lib/auth/rbac.ts) — admins, supervisors, managers, coordinators; never agents.
+
 | Module | Super Admin | Admin | Supervisor | Manager | Coordinator | Client | Agent |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Tenants / config | VCEDAX | VCE | V | V | – | – | – |
@@ -386,9 +395,13 @@ Errors: JSON `{ error: { code, message } }`; list endpoints return `{ items, nex
 | --- | --- | --- |
 | Agent | My queue | callbacks due, missed inbound calls, fresh, recycled; live counter; availability toggle; status Available / On call / Wrap-up |
 | Agent | Inbound screen-pop | toast + auto-open of the caller's lead (or new-lead form) when an inbound call is answered on the agent's phone |
-| Agent | Lead workspace | contact card (masked per role), **Call** button ("Calling your phone…" → Ringing customer → Connected mm:ss → Ended), no dial pad or audio in the browser, disposition + sub-disposition, callback quick picks (Today 6 PM, Tomorrow, +2 days…), stage, custom fields, timeline, WhatsApp/email send (consent-gated) |
+| Agent | Lead workspace | queue filter (search name/city/phone digits/outcome · stage · source · tabs) with Prev/Next "3 of 8" through the filtered list; Details grid shows EVERY field (name, mobile, email, campaign, stage, owner, custom fields, extra imported columns, "Add a detail") editable in place — dropdowns for stage/owner/dropdown & yes-no fields, one field per save; "End that call" clears the agent's own stuck call (no provider webhook); contact card (masked per role), **Call** button ("Calling your phone…" → Ringing customer → Connected mm:ss → Ended), no dial pad or audio in the browser, disposition + sub-disposition, callback quick picks (Today 6 PM, Tomorrow, +2 days…), stage, custom fields, timeline, WhatsApp/email send (consent-gated) |
+| Everyone | Workspace switcher | avatar / workspace badge in the rail → profile panel listing every workspace the login belongs to (role per workspace); super admins also see "Enter" for the rest. Switching changes everything: setup, leads, telephony, people (SECURITY.md §3.1) |
+| Manager | Leads (Zoho-style, built 2026-10-02) | filter rail (saved filters personal/shared, system filters: my leads, unassigned, not called, callback overdue/today, re-enquired; status, stage, source, owner, process, created — with counts), sort (newest, oldest, name, next callback, last activity), list or board (by stage, drag to move), manage columns + records per page (25/50/100), bulk assign / move stage / delete / restore, row actions Edit + Delete pinned right with Lead name pinned left, table settings (Manage Columns, Reset Column Size, Records Per Page, View Mode wrap/clip, drag-to-resize columns), Prev/Next keyset paging with page x of y, Recycle bin, Edit drawer (contact, stage, owner, custom fields; phone only for roles that see full numbers), Create Lead drawer (dedupe-aware), CSV export (X permission) |
+| Everyone with calls | Calls (built 2026-10-03) | call log in scope: when (tenant tz), in/out, lead, number (masked per role), agent, result, duration, talk time, outcome; filters (today/7d/30d/all, direction, result, agent, with recording, name/digits); totals strip; ▶ inline player per call (and in the console timeline); "Sync now" (supervisors+) + automatic 15-min sync from CallerDesk |
 | Manager | Team dashboard | live agents, open/unassigned leads, SLA breaches, reassign |
 | Manager | Reports | funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, period comparisons, CSV export |
+| Admin | Setup home (built 2026-10-02) | searchable grid: General (company settings, users, workspaces) · Security (roles & permissions, audit log, login history) · Channels (telephony, lead sources, webhooks) · Customization (processes, outcomes & fields) · Automation (assignment, reminders/SLA) · Data (import, export, remove sample data) · Training (planned). Planned items shown greyed with their phase |
 | Admin | Processes | stages, won stage, dispositions, assignment method + weights + caps + hours, dedupe rule |
 | Admin | Sources | add source, field-map editor, key shown once, health, CSV import with batch report |
 | Admin | Users and teams | roster (share, agent phone + Verify test call, DID, skills, caps), process mapping |
@@ -412,7 +425,7 @@ UI stack: Next.js App Router, React Server Components, Tailwind CSS + shadcn/ui.
 | Charts | Hand-drawn SVG, direct labels, no chart library |
 | Code | `app/globals.css` tokens (Tailwind v4 `@theme`), `components/`, sample data in `lib/ui/sample-data.ts` (shapes mirror the DB) |
 
-Screens: `/login`, `/console`, `/leads`, `/dashboard` (Floor), `/admin` (Setup). They render fictional sample data, marked "Sample data", until T1.11 connects them to the APIs.
+Screens: `/login`, `/console`, `/leads`, `/dashboard` (Floor), `/admin` (Setup) — all on live data since 2026-10-02.
 
 ## 10. crmv7 → new system mapping
 

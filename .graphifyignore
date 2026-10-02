@@ -1,0 +1,13 @@
+# Never read secrets into the knowledge graph (second line of defence after .gitignore)
+PASSWORD.md
+*.credentials.md
+.env
+.env.*
+.vercel/
+# Generated / vendored
+node_modules/
+.next/
+graphify-out/
+drizzle/meta/
+tsconfig.tsbuildinfo
+next-env.d.ts

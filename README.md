@@ -96,6 +96,7 @@ npm install
 vercel link                    # link to the Vercel project
 vercel env pull .env.local     # Neon, Upstash, Blob vars from Marketplace integrations
 npm run db:migrate             # apply drizzle/ migrations (tables + RLS)
+npm run seed:users             # one login per role → PASSWORD.md (git-ignored; --reset rotates)
 npm run dev                    # http://localhost:3000
 npm test                       # unit + Postgres integration tests (no setup needed)
 npm run lint && npm run typecheck && npm run build

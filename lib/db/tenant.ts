@@ -60,8 +60,11 @@ async function runAsTenant<T>(db: Db, ctx: TenantContext, fn: (tx: Tx) => Promis
   if (!isUuid(ctx.tenantId)) throw new Error("withTenant: invalid tenantId");
   return db.transaction(
     async (tx) => {
-      await tx.execute(sql`select set_config('app.tenant_id', ${ctx.tenantId}, true)`);
-      await tx.execute(sql`set local role app_rls`);
+      // ONE round trip for both: set_config('role', …, true) is exactly
+      // `SET LOCAL ROLE`. Every round trip counts (~100 ms from a laptop to
+      // Neon Singapore), and this runs at the start of every transaction.
+      // tenant_id is set first, then the role switch.
+      await tx.execute(sql`select set_config('app.tenant_id', ${ctx.tenantId}, true), set_config('role', 'app_rls', true)`);
       return fn(tx);
     },
     { accessMode },

@@ -53,7 +53,14 @@ export function parseWebhookBody(req: Request, rawBody: string): Record<string, 
     }
   }
   for (const [k, v] of new URL(req.url).searchParams) {
-    if (k !== "key" && out[k] === undefined) out[k] = v; // never store the secret key
+    if (k === "key") {
+      // GET providers sometimes append "?a=1&b=2" to a URL that already has
+      // "?key=…", giving key="SECRET?a=1" — recover those params too.
+      const q = v.indexOf("?");
+      if (q >= 0) for (const [k2, v2] of new URLSearchParams(v.slice(q + 1))) if (out[k2] === undefined) out[k2] = v2;
+      continue; // never store the secret key
+    }
+    if (out[k] === undefined) out[k] = v;
   }
   return out;
 }

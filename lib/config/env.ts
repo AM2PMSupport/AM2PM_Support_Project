@@ -23,8 +23,28 @@ function parse<S extends z.ZodType>(schema: S, group: string, source: Record<str
 }
 
 export const appEnv = lazy(() =>
-  parse(z.object({ APP_URL: z.url() }), "app"),
+  parse(
+    z.object({
+      APP_URL: z.url(),
+      // Public HTTPS address that OUTSIDE services call (CallerDesk, lead
+      // sources). Never localhost: a provider can't reach a laptop. Falls back
+      // to APP_URL when unset (production, where APP_URL is already public).
+      PUBLIC_URL: z.url().optional(),
+    }),
+    "app",
+  ),
 );
+
+/** Base URL for webhook URLs handed to providers (see PUBLIC_URL). */
+export function publicBaseUrl(): string {
+  const env = appEnv();
+  return (env.PUBLIC_URL ?? env.APP_URL).replace(/\/+$/, "");
+}
+
+/** True when a URL is only reachable from this machine. */
+export function isLocalUrl(url: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|[^/]+\.local)(:|\/|$)/i.test(url);
+}
 
 export const databaseEnv = lazy(() =>
   parse(
@@ -76,5 +96,15 @@ export const securityEnv = lazy(() =>
       CRON_SECRET: z.string().min(16),
     }),
     "security",
+  ),
+);
+
+export const authEnv = lazy(() =>
+  parse(
+    z.object({
+      // Signs session cookies (lib/auth/token.ts). Different per environment.
+      AUTH_SECRET: z.string().min(32),
+    }),
+    "auth",
   ),
 );

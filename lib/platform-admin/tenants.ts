@@ -4,7 +4,7 @@
  * (allowed only in lib/platform-admin, RULE.md §1.4).
  */
 import { and, eq, inArray } from "drizzle-orm";
-import { tenants, type Tenant } from "@/lib/db/schema";
+import { integrations, tenants, type Tenant } from "@/lib/db/schema";
 import { isUuid } from "@/lib/db/tenant";
 import { platformDb } from "@/lib/platform-admin/db";
 import { systemContext, type TenantContext } from "@/lib/tenancy/context";
@@ -31,4 +31,14 @@ export async function contextForTenantId(tenantId: string): Promise<{ ctx: Tenan
   const tenant = await tenantById(tenantId);
   if (!tenant) throw new Error(`tenant ${tenantId} not found`);
   return { ctx: systemContext(tenant), tenant };
+}
+
+/** Tenants with an active telephony integration (for the calls sync). */
+export async function tenantsWithTelephony(): Promise<string[]> {
+  const rows = await platformDb()
+    .selectDistinct({ id: integrations.tenantId })
+    .from(integrations)
+    .innerJoin(tenants, eq(tenants.id, integrations.tenantId))
+    .where(and(eq(integrations.kind, "telephony"), eq(integrations.status, "active"), inArray(tenants.status, ["active", "trial"])));
+  return rows.map((r) => r.id);
 }
