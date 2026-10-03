@@ -153,8 +153,13 @@ Session cookie or API key (`read`). Returns leads in the caller's scope (agent: 
 | `status` | `open` (default) · `won` · `lost` · `dnc` · `all` · `deleted` (Recycle bin — roles with leads **D** only) |
 | `stage`, `source`, `process` | comma-separated values (source = kind, e.g. `meta_ads,web_form`; process = ids) |
 | `owner` | comma-separated user ids; `none` = unassigned |
-| `flag` | comma-separated: `mine`, `unassigned`, `not_called`, `callback_overdue`, `callback_today`, `re_enquired` |
+| `flag` | comma-separated system filters (all must match): `mine`, `unassigned`, `assigned`, `not_called`, `touched`, `callback_overdue`, `callback_today`, `has_callback`, `no_callback`, `re_enquired`, `stale_7d` (no activity 7+ days), `has_email`, `no_email`, `no_phone`, `converted_today` |
 | `created` | `today` · `7d` · `30d` (workspace timezone) |
+| `created_from`, `created_to` · `activity_from`, `activity_to` · `callback_from`, `callback_to` | `yyyy-mm-dd`, inclusive, workspace timezone (created date · last activity · next callback) |
+| `campaign`, `outcome` | comma-separated campaign names / last-outcome labels |
+| `city` | contains (case-insensitive) |
+| `attempts_min`, `attempts_max` | call attempts range |
+| `cf_<key>` | custom field filter, one param per field: `~text` contains · `=a\|b` any of · `n:5..20` number range · `d:2026-10-01..2026-10-31` date range · `b:yes` / `b:no`. Either side of a range may be empty. Unknown/malformed values are ignored. |
 | `sort` | `newest` (default) · `oldest` · `name` · `callback` · `activity` |
 | `limit` | 1–100, default 50 (UI: 25/50/100) |
 | `cursor` | `nextCursor` from the previous page (keyset on sort value + id; never OFFSET) |
@@ -414,8 +419,23 @@ input LeadFilter {
   source: [String!]
   owner: [String!]
   process: [ID!]
+  "System filters, e.g. mine, unassigned, not_called, callback_overdue, has_email, stale_7d (API.md §3.7)."
   flag: [String!]
   created: String
+  campaign: [String!]
+  outcome: [String!]
+  city: String
+  attemptsMin: Int
+  attemptsMax: Int
+  "Dates are yyyy-mm-dd in the workspace timezone, inclusive."
+  createdFrom: String
+  createdTo: String
+  activityFrom: String
+  activityTo: String
+  callbackFrom: String
+  callbackTo: String
+  "Custom fields { key: encoded value }: ~text contains, =a|b any of, n:min..max, d:from..to, b:yes or b:no (API.md §3.7)."
+  custom: JSON
 }
 
 type LeadConnection {

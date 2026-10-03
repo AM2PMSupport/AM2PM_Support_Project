@@ -126,6 +126,13 @@ describe("GraphQL", () => {
     expect(q.data!.lead.custom.city).toBe("Pune");
     expect(q.data!.processes.map((p: { name: string }) => p.name)).toEqual(["Sales"]);
 
+    // Custom-field + system filters work over GraphQL exactly like the screens.
+    const f = await graphql(readKey, `{ leads(filter: { custom: { city: "~pun" }, flag: ["not_called"] }) { items { name } } }`);
+    expect(f.errors).toBeUndefined();
+    expect(f.data!.leads.items).toEqual([{ name: "GQL Lead" }]);
+    const none = await graphql(readKey, `{ leads(filter: { custom: { city: "~delhi" } }) { items { name } } }`);
+    expect(none.data!.leads.items).toEqual([]);
+
     const upd = await graphql(writeKey, `mutation { setStage(id: "${leadId}", stage: "Hot") { stage } }`);
     expect(upd.data!.setStage.stage).toBe("Hot");
   });

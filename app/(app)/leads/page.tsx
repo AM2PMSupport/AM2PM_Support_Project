@@ -30,9 +30,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const [{ items, nextCursor, prevCursor, total }, options, views] = await Promise.all([listLeads(ctx, query), leadFilterOptions(ctx), listViews(ctx)]);
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    // Fixed frame: page never scrolls; filter rail and table scroll inside, paging pinned at the bottom.
+    <div className="flex h-dvh flex-col">
       <Topbar search={false} title="Leads" subtitle={`${role === "agent" ? "Your leads" : "All leads you can see"} · ${ctx.tenantName}`} />
-      <div className="flex flex-col gap-4 px-6 py-5">
+      <div className="flex min-h-0 flex-1 flex-col px-4 pt-3 pb-2 md:px-6">
         <Suspense>
           <LeadsWorkspace
             rows={items}

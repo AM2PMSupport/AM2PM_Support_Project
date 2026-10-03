@@ -12,6 +12,7 @@ import { log } from "@/lib/log";
 import { getLeadDetail, getQueue } from "@/lib/agent/queue";
 import { endMyStuckCall, getMyLiveCall, OutcomeInput, saveOutcome, setStage, StageInput } from "@/lib/agent/outcome";
 import { EditLeadInput, updateLead } from "@/lib/leads/edit";
+import { LeadQuery } from "@/lib/leads/list";
 import { and, eq, inArray } from "drizzle-orm";
 import { userProcesses, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -37,7 +38,13 @@ async function run<T>(fn: (ctx: SessionContext) => Promise<T>): Promise<Result<T
 
 const Id = z.uuid();
 
-export const queueAction = async () => run((ctx) => getQueue(ctx));
+/** Queue with the console's filters (same params as the Leads screen, incl. cf_* custom-field filters). */
+export const queueAction = async (filters: unknown = {}) =>
+  run((ctx) => {
+    const f = z.record(z.string().max(60), z.string().max(2000)).parse(filters ?? {});
+    LeadQuery.parse(f); // reject bad params with a readable error
+    return getQueue(ctx, 150, f);
+  });
 export const leadAction = async (id: unknown) => run((ctx) => getLeadDetail(ctx, Id.parse(id)));
 export const startCallAction = async (leadId: unknown) => run((ctx) => placeCall(ctx, Id.parse(leadId)));
 export const callStatusAction = async (interactionId?: unknown) =>

@@ -69,8 +69,8 @@ export function CallsLog({
   const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone });
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="panel grid grid-cols-2 md:grid-cols-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <section className="panel grid shrink-0 grid-cols-2 md:grid-cols-4">
         {[
           { k: "Calls", v: totals.calls.toLocaleString("en-IN") },
           { k: "Connected", v: `${totals.connected.toLocaleString("en-IN")}${totals.calls ? ` · ${Math.round((totals.connected / totals.calls) * 100)}%` : ""}` },
@@ -84,7 +84,7 @@ export function CallsLog({
         ))}
       </section>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <div className="flex h-9 items-center rounded-md border border-rule bg-sheet p-0.5">
           {[["today", "Today"], ["7d", "7 days"], ["30d", "30 days"], ["all", "All"]].map(([v, l]) => (
             <button key={v} onClick={() => go({ range: v === "7d" ? "" : v! })} className={`h-8 rounded-[4px] px-3 text-[12.5px] font-medium ${range === v ? "bg-ink text-sheet" : "text-ink-3 hover:text-ink"}`}>{l}</button>
@@ -137,10 +137,10 @@ export function CallsLog({
       </div>
       {syncMsg && <p className="rounded-md bg-teal/15 px-3 py-2 text-[12.5px]">{syncMsg}</p>}
 
-      <div className={`panel overflow-x-auto transition-opacity ${pending ? "opacity-60" : ""}`}>
-        <table className="w-full text-[13px]">
+      <div className={`panel min-h-0 flex-1 overflow-auto overscroll-contain transition-opacity ${pending ? "opacity-60" : ""}`}>
+        <table className="w-full border-separate border-spacing-0 text-[13px]">
           <thead>
-            <tr className="border-b border-rule text-left text-[11.5px] text-ink-3">
+            <tr className="text-left text-[11.5px] text-ink-3 [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:border-b [&>th]:border-rule [&>th]:bg-sheet">
               <th className="w-12 px-3 py-2.5" />
               <th className="px-3 py-2.5 font-medium">When</th>
               <th className="px-3 py-2.5 font-medium">Lead</th>
@@ -157,7 +157,7 @@ export function CallsLog({
               const st = STATUS[c.status] ?? { label: c.status.replace(/_/g, " "), tone: "muted" as const };
               const open = playing === c.id;
               return [
-                <tr key={c.id} className={`border-b border-rule ${open ? "bg-paper" : "hover:bg-paper/60"}`}>
+                <tr key={c.id} className={`[&>td]:border-b [&>td]:border-rule ${open ? "bg-paper" : "hover:bg-paper/60"}`}>
                   <td className="px-3 py-2">
                     {c.hasRecording ? (
                       <button onClick={() => setPlaying(open ? null : c.id)} aria-label={open ? "Close player" : "Play recording"} title={open ? "Close player" : "Play recording"} className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${open ? "bg-ink text-sheet" : "bg-teal/25 text-ink hover:bg-teal/45"}`}>
@@ -182,7 +182,7 @@ export function CallsLog({
                   <td className="px-3 py-2 whitespace-nowrap text-ink-2">{c.outcome ?? <span className="text-ink-4">—</span>}</td>
                 </tr>,
                 open && (
-                  <tr key={`${c.id}-player`} className="border-b border-rule bg-paper">
+                  <tr key={`${c.id}-player`} className="bg-paper [&>td]:border-b [&>td]:border-rule">
                     <td />
                     <td colSpan={8} className="px-3 pb-3">
                       <audio controls autoPlay preload="none" src={`/api/v1/calls/${c.id}/recording`} className="h-10 w-full max-w-[720px]">
@@ -203,7 +203,7 @@ export function CallsLog({
           </tbody>
         </table>
       </div>
-      <div className="flex items-center justify-between text-[12.5px] text-ink-3">
+      <div className="flex shrink-0 items-center justify-between border-t border-rule pt-2 text-[12.5px] text-ink-3">
         <span className="font-mono tnum">{rows.length ? `${rows.length} of ${total.toLocaleString("en-IN")}` : ""}</span>
         <span className="flex gap-2">
           {params.cursor && <button onClick={() => go({})} className="h-8 rounded-md border border-rule bg-sheet px-3 font-medium text-ink-2 hover:border-ink-3">← Newest</button>}

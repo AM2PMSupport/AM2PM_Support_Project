@@ -6,6 +6,8 @@ Guidance for Claude Code working in this repository.
 
 AM2PM Call Center CRM: a multi-client BPO CRM that replaces the per-client Google Sheets CRM (`crmv7.gs`). Calls, inbound and outbound, go through the provider's click-to-call API and webhooks; there is no SIP. Stack: Next.js on Vercel, Neon Postgres (Drizzle ORM, row-level security), Upstash QStash + Redis, Vercel Cron, Blob/R2, Auth.js. The product is in [PRD.md](PRD.md) and the system shape in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+**Progress tracking:** [WORKPHASE.md](WORKPHASE.md) is the owner's view of what is built in which phase; [TASK.md](TASK.md) holds the task specs. Whenever a task starts, finishes, is added (new owner request) or dropped, update BOTH in the same change, plus WORKPHASE's Overview, "Next up", "Added during the build" and Update log. `tests/workphase.test.ts` fails if they disagree.
+
 **Current state:** live on Vercel + Neon. Email/password sign-in with one login per person and a Zoho-style workspace switcher (SECURITY.md §3.1); Console, Leads (filters, saved filters, board, bulk actions), Floor and Setup (searchable grid) run on real data. Unfinished work is marked `TODO(T<id>)` in code and `[~]` in [TASK.md](TASK.md). Keep both current.
 
 ## Read before changing code

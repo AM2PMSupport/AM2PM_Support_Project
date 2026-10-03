@@ -8,7 +8,7 @@
  * mutations need a write-scope key. `typeDefs` is mirrored verbatim in
  * API.md §6.2 — tests/api-docs.test.ts fails if they drift.
  */
-import { GraphQLError, GraphQLScalarType, Kind, type GraphQLResolveInfo, type ValidationRule } from "graphql";
+import { GraphQLError, GraphQLScalarType, Kind, valueFromASTUntyped, type GraphQLResolveInfo, type ValidationRule } from "graphql";
 import { ZodError } from "zod";
 import { ApiError } from "@/lib/http/errors";
 import { requireWrite, type ApiContext } from "@/lib/api/context";
@@ -90,8 +90,23 @@ input LeadFilter {
   source: [String!]
   owner: [String!]
   process: [ID!]
+  "System filters, e.g. mine, unassigned, not_called, callback_overdue, has_email, stale_7d (API.md §3.7)."
   flag: [String!]
   created: String
+  campaign: [String!]
+  outcome: [String!]
+  city: String
+  attemptsMin: Int
+  attemptsMax: Int
+  "Dates are yyyy-mm-dd in the workspace timezone, inclusive."
+  createdFrom: String
+  createdTo: String
+  activityFrom: String
+  activityTo: String
+  callbackFrom: String
+  callbackTo: String
+  "Custom fields { key: encoded value }: ~text contains, =a|b any of, n:min..max, d:from..to, b:yes or b:no (API.md §3.7)."
+  custom: JSON
 }
 
 type LeadConnection {
@@ -259,7 +274,8 @@ const JSONScalar = new GraphQLScalarType({
   name: "JSON",
   serialize: (v) => v,
   parseValue: (v) => v,
-  parseLiteral: (ast) => (ast.kind === Kind.STRING ? ast.value : ast.kind === Kind.INT || ast.kind === Kind.FLOAT ? Number(ast.value) : ast.kind === Kind.BOOLEAN ? ast.value : null),
+  // Objects and lists written inline in a query (e.g. custom: { city: "~pun" }) too.
+  parseLiteral: (ast, variables) => valueFromASTUntyped(ast, variables),
 });
 
 /** Did the client select this top-level field (skip work it didn't ask for)? */
@@ -300,6 +316,18 @@ export const resolvers = {
           process: csv(f.process as string[]),
           flag: csv(f.flag as string[]),
           created: (f.created as "today") ?? undefined,
+          campaign: csv(f.campaign as string[]),
+          outcome: csv(f.outcome as string[]),
+          city: (f.city as string) ?? undefined,
+          attempts_min: (f.attemptsMin as number) ?? undefined,
+          attempts_max: (f.attemptsMax as number) ?? undefined,
+          created_from: (f.createdFrom as string) ?? undefined,
+          created_to: (f.createdTo as string) ?? undefined,
+          activity_from: (f.activityFrom as string) ?? undefined,
+          activity_to: (f.activityTo as string) ?? undefined,
+          callback_from: (f.callbackFrom as string) ?? undefined,
+          callback_to: (f.callbackTo as string) ?? undefined,
+          ...Object.fromEntries(Object.entries((f.custom as Record<string, unknown>) ?? {}).map(([k, v]) => [`cf_${k}`, String(v)])),
           sort: a.sort as "newest",
           limit: Math.min(Math.max(a.first ?? 50, 1), 100),
           cursor: a.after ?? undefined,

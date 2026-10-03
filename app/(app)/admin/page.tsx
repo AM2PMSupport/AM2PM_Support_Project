@@ -131,7 +131,7 @@ function setupGroups(role: Role): SetupGroup[] {
 }
 type TabId = (typeof TABS)[number]["id"];
 
-export default async function SetupPage({ searchParams }: { searchParams: Promise<{ tab?: string; process?: string; cursor?: string }> }) {
+export default async function SetupPage({ searchParams }: { searchParams: Promise<{ tab?: string; process?: string; cursor?: string; q?: string }> }) {
   const ctx = await requirePage("admin");
   const sp = await searchParams;
   const role = ctx.actor.role;
@@ -198,12 +198,22 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   } else if (tab === "audit") {
     if (!can(role, "audit", "V")) body = <NoAccess />;
     else {
-      const [log, logins] = await Promise.all([listAudit(ctx, sp.cursor), loginActivity(ctx)]);
+      const aq = (sp.q ?? "").trim().slice(0, 60);
+      const [log, logins] = await Promise.all([listAudit(ctx, sp.cursor, 50, aq || undefined), loginActivity(ctx)]);
       const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: ctx.timezone });
       body = (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
           <section className="panel overflow-hidden">
-            <div className="border-b border-rule px-4 py-3 text-[13.5px] font-semibold">Audit log</div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule px-4 py-2.5">
+              <span className="text-[13.5px] font-semibold">Audit log</span>
+              {/* Plain GET form: works without JavaScript and keeps the filter in the URL. */}
+              <form action="/admin" className="flex items-center gap-2">
+                <input type="hidden" name="tab" value="audit" />
+                <input name="q" defaultValue={aq} placeholder="Action or person (e.g. lead, password, Ranjan)" aria-label="Search audit log" className="h-8 w-72 rounded-md border border-rule bg-sheet px-2.5 text-[12.5px] outline-none focus:border-ink" />
+                <button className="h-8 rounded-md bg-ink px-3 text-[12px] font-semibold text-sheet">Search</button>
+                {aq && <Link href="/admin?tab=audit" className="text-[12px] text-ink-3 hover:text-ink">Clear</Link>}
+              </form>
+            </div>
             <table className="w-full text-[12.5px]">
               <tbody>
                 {log.items.map((a) => (
@@ -213,12 +223,12 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
                     <td className="px-3 py-2.5"><span className="font-mono text-[12px]">{a.action}</span>{a.after && <div className="mt-0.5 max-w-[420px] truncate font-mono text-[11px] text-ink-4">{a.after}</div>}</td>
                   </tr>
                 ))}
-                {!log.items.length && <tr><td className="px-4 py-6 text-ink-3">Nothing recorded yet.</td></tr>}
+                {!log.items.length && <tr><td className="px-4 py-6 text-ink-3">{aq ? `Nothing matches “${aq}”.` : "Nothing recorded yet."}</td></tr>}
               </tbody>
             </table>
             {log.nextCursor && (
               <div className="border-t border-rule px-4 py-2.5 text-right">
-                <Link href={`/admin?tab=audit&cursor=${encodeURIComponent(log.nextCursor)}`} className="text-[12.5px] font-medium text-teal-ink hover:underline">Older →</Link>
+                <Link href={`/admin?tab=audit&cursor=${encodeURIComponent(log.nextCursor)}${aq ? `&q=${encodeURIComponent(aq)}` : ""}`} className="text-[12.5px] font-medium text-teal-ink hover:underline">Older →</Link>
               </div>
             )}
           </section>

@@ -7,12 +7,13 @@
  * for roles that may not see them (agents still call via click-to-call —
  * the server uses the real number).
  */
-import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { contacts, leads, processes, users, type Interaction, type LeadEvent } from "@/lib/db/schema";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { contacts, leads, processes, userProcesses, users, type Interaction, type LeadEvent } from "@/lib/db/schema";
 import { withTenant, type Tx } from "@/lib/db/tenant";
-import { canSeeFullPhone } from "@/lib/auth/rbac";
+import { canSeeFullPhone, leadScope } from "@/lib/auth/rbac";
 import type { SessionContext } from "@/lib/auth/session";
 import { leadScopeCondition } from "@/lib/leads/scope";
+import { leadFilterWhere, type LeadQueryInput } from "@/lib/leads/list";
 import { maskPhone } from "@/lib/phone/phone";
 import { notFound } from "@/lib/http/errors";
 
@@ -21,7 +22,10 @@ export interface QueueItem {
   name: string;
   phone: string;
   city: string | null;
+  processId: string;
   processName: string;
+  ownerId: string | null;
+  owner: string | null;
   source: string;
   campaign: string | null;
   stage: string;
@@ -48,11 +52,32 @@ function priority(i: QueueItem): number {
   return 3;
 }
 
-export async function getQueue(ctx: SessionContext, limit = 150): Promise<QueueItem[]> {
-  return withTenant(ctx, (tx) => queueIn(tx, ctx, limit));
+/** Processes this person works in (admins: all active) — choices for the console's process filter. */
+export async function myProcesses(ctx: SessionContext): Promise<{ id: string; name: string }[]> {
+  return withTenant(ctx, (tx) =>
+    tx
+      .select({ id: processes.id, name: processes.name })
+      .from(processes)
+      .where(
+        and(
+          eq(processes.status, "active"),
+          leadScope(ctx.actor.role) === "tenant" ? undefined : inArray(processes.id, sql`(select ${userProcesses.processId} from ${userProcesses} where ${userProcesses.userId} = ${ctx.actor.userId})`),
+        ),
+      )
+      .orderBy(processes.name),
+  );
 }
 
-async function queueIn(tx: Tx, ctx: SessionContext, limit = 150): Promise<QueueItem[]> {
+/**
+ * The queue (max `limit`), filtered IN SQL with the same filter as the Leads
+ * screen (lib/leads/list.ts leadFilterWhere) — a large queue can't hide matches,
+ * and a filter means the same thing on both screens. Always open leads.
+ */
+export async function getQueue(ctx: SessionContext, limit = 150, filters: LeadQueryInput = {}): Promise<QueueItem[]> {
+  return withTenant(ctx, (tx) => queueIn(tx, ctx, limit, filters));
+}
+
+async function queueIn(tx: Tx, ctx: SessionContext, limit = 150, filters: LeadQueryInput = {}): Promise<QueueItem[]> {
   const now = Date.now();
   // One statement: the pending-callback facts come back as columns (one round trip, not two).
   const rows = await tx
@@ -60,23 +85,28 @@ async function queueIn(tx: Tx, ctx: SessionContext, limit = 150): Promise<QueueI
       lead: leads,
       contact: contacts,
       processName: processes.name,
+      owner: users.name,
       callbackDue: sql<Date | string | null>`(select min(c.due_at) from callbacks c where c.lead_id = ${leads.id} and c.status = 'pending')`,
       missedCall: sql<boolean>`exists (select 1 from callbacks c where c.lead_id = ${leads.id} and c.status = 'pending' and c.reason = 'missed_call')`,
     })
     .from(leads)
     .innerJoin(contacts, eq(contacts.id, leads.contactId))
     .innerJoin(processes, eq(processes.id, leads.processId))
-    .where(and(leadScopeCondition(ctx), eq(leads.status, "open"), eq(leads.isActive, true)))
+    .leftJoin(users, eq(users.id, leads.assignedTo))
+    .where(leadFilterWhere(ctx, { ...filters, status: "open", cursor: undefined, before: undefined }))
     .orderBy(asc(leads.nextCallbackAt), desc(leads.createdAt))
     .limit(limit);
-  const items: QueueItem[] = rows.map(({ lead, contact, processName, callbackDue, missedCall }) => {
+  const items: QueueItem[] = rows.map(({ lead, contact, processName, owner, callbackDue, missedCall }) => {
     const due = callbackDue ? new Date(callbackDue) : null;
     return {
       id: lead.id,
       name: contact.name ?? "Unknown caller",
       phone: displayPhone(ctx.actor.role, contact.phoneE164),
       city: typeof lead.custom.city === "string" ? lead.custom.city : null,
+      processId: lead.processId,
       processName,
+      ownerId: lead.assignedTo,
+      owner,
       source: lead.source.kind,
       campaign: lead.source.campaign ?? null,
       stage: lead.stage,

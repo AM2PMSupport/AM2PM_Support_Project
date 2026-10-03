@@ -19,11 +19,22 @@ export const SOURCE_LABEL: Record<string, string> = {
 export const FLAG_LABEL: Record<string, string> = {
   mine: "My leads",
   unassigned: "Unassigned",
+  assigned: "Assigned",
   not_called: "Not called yet",
+  touched: "Called at least once",
   callback_overdue: "Callback overdue",
   callback_today: "Callback due today",
+  has_callback: "Has a callback",
+  no_callback: "No callback scheduled",
   re_enquired: "Re-enquired",
+  stale_7d: "No activity in 7+ days",
+  has_email: "Has email",
+  no_email: "No email",
+  no_phone: "No phone number",
+  converted_today: "Converted today",
 };
+/** Flags that only make sense for people who see other people's leads. */
+export const OWNER_FLAGS = new Set(["mine", "unassigned", "assigned"]);
 
 export const SORT_LABEL: Record<string, string> = {
   newest: "Newest first",

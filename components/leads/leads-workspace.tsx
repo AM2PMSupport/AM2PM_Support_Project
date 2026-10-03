@@ -15,6 +15,8 @@ import { LeadsGrid, type GridPrefs } from "@/components/leads/leads-grid";
 import { EditLead } from "@/components/leads/edit-lead";
 import { LeadsBoard } from "@/components/leads/leads-board";
 import { CreateLead } from "@/components/leads/create-lead";
+import { ProcessPicker } from "@/components/ui/process-picker";
+import { AppliedFilters } from "@/components/leads/applied-filters";
 import { DEFAULT_COLUMNS, SORT_LABEL, type ColumnKey } from "@/components/leads/meta";
 import { bulkAssignAction, bulkStageAction, deleteLeadsAction, deleteViewAction, restoreLeadsAction, saveViewAction } from "@/app/(app)/leads/actions";
 import { classifyQuery } from "@/lib/leads/search-classify";
@@ -88,7 +90,8 @@ export function LeadsWorkspace({
   const params = useMemo(() => Object.fromEntries(sp.entries()) as Record<string, string>, [sp]);
   const [pending, startTransition] = useTransition();
   const [q, setQ] = useState(params.q ?? "");
-  const [showFilters, setShowFilters] = useState(true);
+  // null = default by screen size (rail on ≥lg, hidden below); then the Filter button decides.
+  const [filtersOpen, setFiltersOpen] = useState<boolean | null>(null);
   const [sortOpen, setSortOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -144,7 +147,7 @@ export function LeadsWorkspace({
     startTransition(() => router.replace(`${pathname}?${p.toString()}`, { scroll: false }));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
-  const filtersOn = ["flag", "stage", "source", "owner", "process", "created", "q"].some((k) => params[k]);
+  const filtersOn = Object.entries(params).some(([k, v]) => v && !["sort", "view", "limit", "cursor", "before", "page"].includes(k) && !(k === "status" && v === "open"));
 
   async function runBulk(fn: () => Promise<{ ok: boolean; data?: { moved: number; skipped: number }; error?: string }>, verb: string) {
     setBulkMsg(null);
@@ -157,10 +160,14 @@ export function LeadsWorkspace({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Toolbar — stays under the top bar while scrolling */}
-      <div className="sticky top-[60px] z-20 -mx-6 -mt-5 flex flex-wrap items-center gap-2 border-b border-rule bg-paper/95 px-6 py-3 backdrop-blur-[2px]">
-        <button onClick={() => setShowFilters(!showFilters)} className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-[12.5px] font-medium ${showFilters ? "border-ink bg-ink text-sheet" : "border-rule bg-sheet text-ink-2 hover:border-ink-3"}`}>
+    <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+      {/* Toolbar — fixed above the scrolling list */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <button
+          onClick={() => setFiltersOpen(!(filtersOpen ?? (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches)))}
+          aria-pressed={filtersOpen ?? undefined}
+          className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-[12.5px] font-medium ${filtersOpen === false ? "border-rule bg-sheet text-ink-2 hover:border-ink-3" : filtersOpen ? "border-ink bg-ink text-sheet" : "border-rule bg-sheet text-ink-2 hover:border-ink-3 lg:border-ink lg:bg-ink lg:text-sheet"}`}
+        >
           <Filter size={14} /> Filter
         </button>
         <div className="relative">
@@ -185,6 +192,7 @@ export function LeadsWorkspace({
           ))}
         </div>
 
+        <ProcessPicker processes={options.processes} value={params.process ? params.process.split(",") : []} onChange={(ids) => go({ process: ids.join(",") })} />
         <label className="ml-1 flex h-9 w-full max-w-[380px] items-center gap-2 rounded-md border border-rule bg-sheet px-3 focus-within:border-ink">
           <Search size={15} className="text-ink-3" />
           <input id="leads-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, last 4 digits, full number, or email" className="h-full flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-4" aria-label="Search leads" />
@@ -206,6 +214,9 @@ export function LeadsWorkspace({
           )}
         </div>
       </div>
+
+      {/* What is filtered right now — visible even when the filter rail is hidden. */}
+      <AppliedFilters className="shrink-0" params={params} options={options} onChange={(patch) => go(patch)} />
 
       {/* Bulk bar */}
       {selected.size > 0 && (
@@ -253,9 +264,10 @@ export function LeadsWorkspace({
         </p>
       )}
 
-      <div className="flex items-start gap-4">
-        {showFilters && (
+      <div className="relative flex min-h-0 flex-1 gap-4">
+        {filtersOpen !== false && (
           <FilterPanel
+            className={`${filtersOpen ? "flex" : "hidden lg:flex"} absolute inset-y-0 left-0 z-30 shadow-[8px_0_30px_-12px_rgba(21,23,28,0.35)] lg:static lg:shadow-none`}
             params={params}
             options={options}
             views={views}
@@ -281,8 +293,9 @@ export function LeadsWorkspace({
           />
         )}
 
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
           {view === "board" ? (
+            <div className="min-h-0 flex-1 overflow-auto">
             <LeadsBoard
               key={sp.toString()}
               rows={rows}
@@ -297,6 +310,7 @@ export function LeadsWorkspace({
                 return null;
               }}
             />
+            </div>
           ) : (
             <LeadsGrid
               rows={rows}
@@ -318,8 +332,8 @@ export function LeadsWorkspace({
           )}
 
           {/* Pagination: keyset both ways, so every page loads equally fast at any depth. */}
-          {view === "list" && total > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 text-[12.5px] text-ink-3">
+          {total > 0 && (
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-rule pt-2 text-[12.5px] text-ink-3">
               <div className="flex items-center gap-2">
                 Records per page
                 <div className="flex rounded-md border border-rule bg-sheet p-0.5">

@@ -102,7 +102,7 @@ export function LeadsGrid({
   const cell = (key: string, extra = "") => ({ "data-cell": key, style: { maxWidth: w(key) }, className: `px-3 py-2.5 ${cellText} ${extra}` });
 
   const th = (k: string, label: string, right?: boolean) => (
-      <th key={k} data-col={k} style={{ width: w(k) }} className={`group/th relative px-3 py-2.5 font-medium whitespace-nowrap ${right ? "text-right" : ""}`}>
+      <th key={k} data-col={k} style={{ width: w(k) }} className={`group/th px-3 py-2.5 font-medium whitespace-nowrap ${right ? "text-right" : ""}`}>
         {label}
         <span onMouseDown={(e) => startResize(e, k)} title="Drag to resize" className="absolute top-1.5 right-0 bottom-1.5 w-1.5 cursor-col-resize rounded border-r-2 border-transparent group-hover/th:border-rule-strong hover:!border-teal-ink" />
       </th>
@@ -118,12 +118,13 @@ export function LeadsGrid({
   );
 
   return (
-    <div className="relative">
-      <div className={`panel overflow-x-auto transition-opacity ${pending ? "opacity-60" : ""}`}>
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {/* Scrolls both ways inside the frame; header row and name/actions columns stay pinned. */}
+      <div className={`panel min-h-0 flex-1 overflow-auto overscroll-contain transition-opacity ${pending ? "opacity-60" : ""}`}>
         <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
           <thead>
-            <tr className="text-left text-[11.5px] text-ink-3 [&>th]:border-b [&>th]:border-rule">
-              <th className="sticky left-0 z-10 w-10 bg-sheet pl-4">
+            <tr className="text-left text-[11.5px] text-ink-3 [&>th]:sticky [&>th]:top-0 [&>th]:z-20 [&>th]:border-b [&>th]:border-rule [&>th]:bg-sheet">
+              <th className="left-0 !z-30 w-10 pl-4">
                 <input
                   type="checkbox"
                   aria-label="Select all on this page"
@@ -132,7 +133,7 @@ export function LeadsGrid({
                   className="h-3.5 w-3.5 accent-[var(--color-ink)]"
                 />
               </th>
-              <th data-col="name" style={{ width: w("name") }} className="group/th sticky left-10 z-10 bg-sheet py-2.5 pr-3 pl-1 font-medium whitespace-nowrap shadow-[1px_0_0_var(--color-rule)]">
+              <th data-col="name" style={{ width: w("name") }} className="group/th left-10 !z-30 py-2.5 pr-3 pl-1 font-medium whitespace-nowrap shadow-[1px_0_0_var(--color-rule)]">
                 Lead name
                 <span onMouseDown={(e) => startResize(e, "name")} title="Drag to resize" className="absolute top-1.5 right-0 bottom-1.5 w-1.5 cursor-col-resize rounded border-r-2 border-transparent group-hover/th:border-rule-strong hover:!border-teal-ink" />
               </th>
@@ -140,7 +141,9 @@ export function LeadsGrid({
                 th(c.key, c.label, c.key === "callback" || c.key === "created" || c.key === "attempts")
               ))}
               {recycleBin && <th className="px-3 py-2.5 font-medium whitespace-nowrap">Deleted</th>}
-              <th className="sticky right-0 z-10 w-[92px] bg-sheet pr-3 text-right shadow-[-1px_0_0_var(--color-rule)]">
+              {/* Filler: absorbs extra width on wide screens so columns keep their sizes. */}
+              <th aria-hidden className="w-full" />
+              <th className="right-0 !z-30 w-[92px] pr-3 text-right shadow-[-1px_0_0_var(--color-rule)]">
                 <button onClick={() => setMenu(menu ? null : "root")} aria-label="Table settings" title="Table settings" className="inline-flex h-7 w-7 items-center justify-center rounded border border-rule text-ink-3 hover:border-ink-3 hover:text-ink">
                   <SlidersHorizontal size={13} />
                 </button>
@@ -196,6 +199,7 @@ export function LeadsGrid({
                   {has("city") && <td {...cell("city", `text-ink-2 ${bg}`)}>{l.city ?? <span className="text-ink-4">—</span>}</td>}
                   {has("created") && <td {...cell("created", `text-right font-mono text-[12px] text-ink-3 tnum ${bg}`)}>{age(l.createdAt, renderedAt)}</td>}
                   {recycleBin && <td className={`px-3 py-2.5 whitespace-nowrap text-ink-3 ${bg}`}>{l.deletedAt ? ago(l.deletedAt, renderedAt) : "—"}</td>}
+                  <td aria-hidden className={bg} />
                   <td className={`sticky right-0 z-[1] pr-3 text-right whitespace-nowrap shadow-[-1px_0_0_var(--color-rule)] ${bg}`}>
                     {showActions && (
                       <span className="inline-flex gap-1">
@@ -225,7 +229,7 @@ export function LeadsGrid({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={columns.length + 4} className="px-4 py-14 text-center text-[13px] text-ink-3">{emptyText}</td>
+                <td colSpan={columns.length + 5} className="px-4 py-14 text-center text-[13px] text-ink-3">{emptyText}</td>
               </tr>
             )}
           </tbody>

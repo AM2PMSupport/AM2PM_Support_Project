@@ -14,9 +14,13 @@
  * Details are edited in place (components/console/lead-details.tsx).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AtSign, Check, ChevronLeft, ChevronRight, Play, CornerDownLeft, Phone, PhoneIncoming, PhoneMissed, PhoneOff, Repeat2, Search, Smartphone, X } from "lucide-react";
+import { AtSign, Check, ChevronLeft, ChevronRight, Filter, CornerDownLeft, Phone, PhoneIncoming, PhoneMissed, PhoneOff, Repeat2, Search, Smartphone, X } from "lucide-react";
 import { callStatusAction, endStuckCallAction, leadAction, queueAction, saveOutcomeAction, setStageAction, startCallAction } from "@/app/(app)/console/actions";
 import { LeadDetails } from "@/components/console/lead-details";
+import { LeadTimeline } from "@/components/console/lead-timeline";
+import { ProcessPicker } from "@/components/ui/process-picker";
+import { FilterPanel, type FilterOptions } from "@/components/leads/filter-panel";
+import { AppliedFilters, appliedChips } from "@/components/leads/applied-filters";
 import { SlaRing } from "@/components/console/sla-ring";
 import { ErrorNote } from "@/components/ui/form";
 import { Kbd, StageTag, Tag } from "@/components/ui/primitives";
@@ -79,20 +83,30 @@ function quickPicks(): { label: string; at: Date }[] {
 export function LiveConsole({
   initialQueue,
   initialLead,
+  processes,
+  options,
+  showOwners,
   canEdit,
   canReassign,
 }: {
   initialQueue: QueueItem[];
   initialLead: LeadDetail | null;
+  processes: { id: string; name: string }[];
+  /** Same filter choices as the Leads screen (stages, sources, owners, campaigns, outcomes, custom fields). */
+  options: FilterOptions;
+  showOwners: boolean;
   canEdit: boolean;
   canReassign: boolean;
 }) {
   const [queue, setQueue] = useState(initialQueue);
   const [filter, setFilter] = useState<"all" | "due" | "new">("all");
   const [q, setQ] = useState("");
-  const [stageF, setStageF] = useState("");
-  const [sourceF, setSourceF] = useState("");
-  const [playingCall, setPlayingCall] = useState<string | null>(null);
+  // Same filters as the Leads screen, applied IN SQL (queueAction → leadFilterWhere).
+  // The pop-up edits a draft; Apply sends it and closes. Text search + tabs stay instant.
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const filtersRef = useRef<Record<string, string>>({});
+  const [queueOpen, setQueueOpen] = useState(false); // small screens only
   const [lead, setLead] = useState<LeadDetail | null>(initialLead);
   const [phase, setPhase] = useState<Phase>("idle");
   const [callId, setCallId] = useState<string | null>(null);
@@ -119,18 +133,26 @@ export function LiveConsole({
     return queue.filter(
       (l) =>
         (filter === "due" ? (l.callbackInMin !== null && l.callbackInMin <= 0) || l.missedCall : filter === "new" ? l.attempts === 0 : true) &&
-        (!stageF || l.stage === stageF) &&
-        (!sourceF || l.source === sourceF) &&
         (!needle ||
           l.name.toLowerCase().includes(needle) ||
           (l.city ?? "").toLowerCase().includes(needle) ||
           (l.lastDisposition ?? "").toLowerCase().includes(needle) ||
           (digits.length >= 3 && l.phone.replace(/\D/g, "").includes(digits))),
     );
-  }, [queue, filter, q, stageF, sourceF]);
-  const stageOptions = useMemo(() => [...new Set(queue.map((l) => l.stage))], [queue]);
-  const sourceOptions = useMemo(() => [...new Set(queue.map((l) => l.source))], [queue]);
-  const narrowed = !!(q || stageF || sourceF);
+  }, [queue, filter, q]);
+  const applied = appliedChips(filters, options).length;
+  const narrowed = !!(q || applied || filters.process);
+  /** Merge a patch (empty value = remove), refetch the queue with it. */
+  function applyFilters(patch: Record<string, string>, replace = false) {
+    const next = Object.fromEntries(Object.entries(replace ? patch : { ...filtersRef.current, ...patch }).filter(([, v]) => v));
+    filtersRef.current = next;
+    setFilters(next);
+    startTransition(async () => {
+      const r = await queueAction(next);
+      if (r.ok) setQueue(r.data);
+      else setError(r.error);
+    });
+  }
   const pos = lead ? visible.findIndex((l) => l.id === lead.id) : -1;
   const counts = {
     all: queue.length,
@@ -167,7 +189,7 @@ export function LiveConsole({
   }, []);
 
   const refreshQueue = useCallback(async () => {
-    const r = await queueAction();
+    const r = await queueAction(filtersRef.current);
     if (r.ok) setQueue(r.data);
   }, []);
 
@@ -272,9 +294,11 @@ export function LiveConsole({
   const stepIndex = steps.findIndex((s) => s.p === phase);
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)_320px]">
+    // Responsive: queue + lead on tablets/laptops; queue + lead + timeline on wide screens;
+    // below md the queue becomes a slide-over opened from the lead header.
+    <div className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[270px_minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_320px] 2xl:grid-cols-[340px_minmax(0,1fr)_360px]">
       {/* Queue */}
-      <aside className="flex min-h-0 flex-col border-r border-rule bg-sheet">
+      <aside className={`${queueOpen ? "absolute inset-y-0 left-0 z-30 flex w-[300px] shadow-[8px_0_30px_-12px_rgba(21,23,28,0.35)]" : "hidden"} min-h-0 flex-col border-r border-rule bg-sheet md:static md:flex md:w-auto md:shadow-none`}>
         <div className="flex items-center gap-1 border-b border-rule p-2">
           {(["all", "due", "new"] as const).map((f) => (
             <button
@@ -294,21 +318,27 @@ export function LiveConsole({
             {q && <button onClick={() => setQ("")} aria-label="Clear filter"><X size={12} className="text-ink-3" /></button>}
           </label>
           <div className="flex gap-1.5">
-            <select value={stageF} onChange={(e) => setStageF(e.target.value)} aria-label="Stage" className="h-8 min-w-0 flex-1 rounded-md border border-rule bg-sheet px-2 text-[12px]">
-              <option value="">All stages</option>
-              {stageOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} aria-label="Source" className="h-8 min-w-0 flex-1 rounded-md border border-rule bg-sheet px-2 text-[12px]">
-              <option value="">All sources</option>
-              {sourceOptions.map((s) => <option key={s} value={s}>{SOURCE[s] ?? s}</option>)}
-            </select>
-            {narrowed && (
-              <button onClick={() => (setQ(""), setStageF(""), setSourceF(""))} className="h-8 rounded-md px-2 text-[12px] font-medium text-teal-ink hover:underline">
-                Clear
-              </button>
-            )}
+            <ProcessPicker className="min-w-0 flex-1" processes={processes} value={filters.process ? filters.process.split(",") : []} onChange={(ids) => applyFilters({ process: ids.join(",") })} />
+            <button
+              onClick={() => setDraft({ ...filters })}
+              aria-haspopup="dialog"
+              className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-md border px-2.5 text-[12px] font-medium ${applied ? "border-ink bg-ink text-sheet" : "border-rule bg-sheet text-ink-3 hover:text-ink"}`}
+            >
+              <Filter size={13} /> Filters{applied ? ` · ${applied}` : ""}
+            </button>
           </div>
-          {narrowed && <p className="px-0.5 text-[11.5px] text-ink-3">{visible.length} of {queue.length} leads match</p>}
+          {/* Applied filters stay visible on the page after the pop-up closes. */}
+          <AppliedFilters params={filters} options={options} onChange={(patch) => applyFilters(patch)} />
+          {narrowed && (
+            <div className="flex items-center justify-between px-0.5 text-[11.5px] text-ink-3">
+              <span>{visible.length} of {queue.length} leads match</span>
+              {(q || filters.process) && !applied && (
+                <button onClick={() => (setQ(""), applyFilters({}, true))} className="font-medium text-teal-ink hover:underline">
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {visible.map((l) => {
@@ -317,7 +347,7 @@ export function LiveConsole({
             const active = l.id === lead?.id;
             return (
               <li key={l.id}>
-                <button onClick={() => open(l.id)} className={`relative flex w-full items-center gap-3 border-b border-rule px-3 py-3 text-left transition ${active ? "bg-paper" : "hover:bg-paper/60"}`}>
+                <button onClick={() => (open(l.id), setQueueOpen(false))} className={`relative flex w-full items-center gap-3 border-b border-rule px-3 py-3 text-left transition ${active ? "bg-paper" : "hover:bg-paper/60"}`}>
                   {active && <span className="absolute inset-y-0 left-0 w-[3px] bg-ink" />}
                   <SlaRing fraction={fraction} overdue={overdue} />
                   <span className="min-w-0 flex-1">
@@ -351,7 +381,7 @@ export function LiveConsole({
       </aside>
 
       {/* Lead */}
-      <main className="min-h-0 overflow-y-auto px-8 py-7">
+      <main className="min-h-0 overflow-y-auto px-4 py-5 md:px-6 xl:px-8 xl:py-7">
         {!lead ? (
           <div className="dotgrid flex h-full items-center justify-center rounded-md">
             <p className="panel px-5 py-4 text-[13px] text-ink-3">Pick a lead from your queue.</p>
@@ -360,7 +390,10 @@ export function LiveConsole({
           <div className={`mx-auto flex max-w-[760px] flex-col gap-5 transition-opacity ${busy && !saved ? "opacity-80" : ""}`}>
             <header>
               <div className="mb-2 flex items-center justify-between gap-3 text-[12px] text-ink-3">
-                <span className="truncate">{lead.processName}{lead.owner ? ` · owner ${lead.owner}` : ""}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <button onClick={() => setQueueOpen(true)} className="h-7 shrink-0 rounded border border-rule bg-sheet px-2 text-[12px] font-medium text-ink-2 md:hidden">Queue · {visible.length}</button>
+                  <span className="truncate">{lead.processName}{lead.owner ? ` · owner ${lead.owner}` : ""}</span>
+                </span>
                 {visible.length > 0 && (
                   <span className="flex shrink-0 items-center gap-1">
                     <button onClick={() => pos > 0 && open(visible[pos - 1]!.id)} disabled={pos <= 0} aria-label="Previous lead" title="Previous lead (K)" className="inline-flex h-7 w-7 items-center justify-center rounded border border-rule bg-sheet text-ink-2 hover:border-ink-3 disabled:opacity-35">
@@ -567,40 +600,47 @@ export function LiveConsole({
 
             {/* Order: call → outcome → details (owner's choice). Details stay editable before, during and after a call. */}
             <LeadDetails key={lead.id} lead={lead} canEdit={canEdit} canReassign={canReassign} onSaved={(d) => (setLead(d), void refreshQueue())} onError={setError} />
+
+            <section className="panel p-4 xl:hidden">
+              <div className="eyebrow mb-3">Timeline</div>
+              <LeadTimeline key={lead.id} items={lead.timeline} now={now} />
+            </section>
           </div>
         )}
       </main>
 
-      {/* Timeline */}
-      <aside className="min-h-0 overflow-y-auto border-l border-rule bg-sheet px-5 py-6">
-        <div className="eyebrow mb-4">Timeline</div>
-        {lead ? (
-          <ol className="relative">
-            <span className="absolute left-[4px] top-2 bottom-2 w-px bg-rule" />
-            {lead.timeline.map((t) => (
-              <li key={t.id} className="relative mb-5 pl-6 last:mb-0">
-                <span className={`absolute left-0 top-[5px] h-[9px] w-[9px] rounded-full ring-[3px] ring-sheet ${t.tone === "teal" ? "bg-teal" : t.tone === "ember" ? "bg-ember" : t.tone === "moss" ? "bg-moss" : "bg-ink-3"}`} />
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[13px] font-semibold leading-snug">{t.title}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-ink-4 tnum">{agoIso(t.at, now)}</span>
-                </div>
-                {t.detail && <p className="mt-0.5 text-[12px] leading-snug text-ink-3">{t.detail}</p>}
-                {t.hasRecording && t.callId && (
-                  playingCall === t.callId ? (
-                    <audio controls autoPlay preload="none" src={`/api/v1/calls/${t.callId}/recording`} className="mt-1.5 h-8 w-full" onEnded={() => setPlayingCall(null)} />
-                  ) : (
-                    <button onClick={() => setPlayingCall(t.callId!)} className="mt-1 inline-flex items-center gap-1 rounded-full bg-teal/25 px-2 py-0.5 text-[11.5px] font-medium hover:bg-teal/45">
-                      <Play size={11} /> Play recording
-                    </button>
-                  )
-                )}
-                {t.by && <p className="mt-0.5 text-[11px] text-ink-4">by {t.by}</p>}
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="text-[12.5px] text-ink-4">—</p>
-        )}
+      {/* Filter pop-up: edit a draft, Apply sends it and closes (console has little room for a rail). */}
+      {draft && (
+        <div className="fixed inset-0 z-50 bg-ink/25" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
+          <div role="dialog" aria-label="Filter the queue" className="absolute top-3 bottom-3 left-[84px] flex w-[320px] max-w-[calc(100vw-96px)] flex-col overflow-hidden rounded-lg border border-rule bg-sheet shadow-[0_24px_60px_-20px_rgba(21,23,28,0.45)]">
+            <div className="flex shrink-0 items-center justify-between border-b border-rule px-4 py-3">
+              <span className="text-[14px] font-semibold">Filter the queue</span>
+              <button onClick={() => setDraft(null)} aria-label="Close" className="rounded p-1 text-ink-3 hover:bg-paper hover:text-ink"><X size={15} /></button>
+            </div>
+            <FilterPanel
+              variant="popover"
+              className="flex min-h-0 flex-1 rounded-none border-0"
+              params={draft}
+              options={options}
+              showOwners={showOwners}
+              onChange={(patch) => setDraft((d) => Object.fromEntries(Object.entries({ ...d, ...patch }).filter(([, v]) => v)))}
+            />
+            <div className="flex shrink-0 items-center gap-2 border-t border-rule px-4 py-3">
+              <button onClick={() => (applyFilters(draft, true), setDraft(null))} className="h-9 flex-1 rounded-md bg-ink text-[13px] font-semibold text-sheet hover:bg-ink-2">
+                Apply
+              </button>
+              <button onClick={() => setDraft(filters.process ? { process: filters.process } : {})} className="h-9 rounded-md border border-rule px-3 text-[13px] font-medium text-ink-2 hover:border-ink-3">
+                Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timeline — right column on wide screens (xl+); inside the lead column below that */}
+      <aside className="hidden min-h-0 overflow-y-auto border-l border-rule bg-sheet px-5 py-6 xl:block">
+        <div className="eyebrow mb-3">Timeline</div>
+        {lead ? <LeadTimeline key={lead.id} items={lead.timeline} now={now} /> : <p className="text-[12.5px] text-ink-4">—</p>}
       </aside>
     </div>
   );

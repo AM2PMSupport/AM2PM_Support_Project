@@ -82,16 +82,16 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] T1.35 Disposition + sub-disposition form; required before next call; callback quick picks
 - [x] T1.36 Callbacks model + reminder cron (5 min): notify 15 min before, missed, escalate at 30 min — `lib/platform-admin/reminders.ts`, QStash schedule `am2pm-callback-reminders` every 5 min; bell in the top bar
 - [x] T1.37 `TelephonyAdapter` interface + normalised call events (DESIGN §5.1)
-- [~] T1.37a CallerDesk adapter `clickToCall` (10-digit numbers, `canonicalDid`, error mapping to plain messages) — params and webhook fields checked against CallerDesk docs (api.callerdesk.io) 2026-10-02: call_from_did=1, campid matching, Direction IVR/WEBOBD, leg times, IST timestamps, CallRecordingUrl. Left: confirm with one real call on the live account
+- [x] T1.37a CallerDesk adapter `clickToCall` (10-digit numbers, `canonicalDid`, error mapping to plain messages) — verified against CallerDesk docs and live: click-to-call returns campid; real calls 2026-10-02/03 completed with webhooks + recordings
 - [x] T1.37b Agent phone + DID on users; "Verify" test call; telephony admin screen (credentials, DIDs → process/direction, webhook URL)
 - [x] T1.37c `POST /api/v1/leads/{id}/call`: access + DNC + `call:active` lock → `initiated` interaction → adapter → provider call id
 - [~] T1.37d Outbound state machine from webhooks (initiated → … → completed); attempts; presence On call / Wrap-up; disposition required after end
-- [~] T1.38 Telephony webhook route `/api/hooks/{tenant}/telephony/{provider}`; CallerDesk `verifyWebhook` + `parseWebhook`; port `resolveCustomerPhone_` + caller-leg cache (Redis)
+- [x] T1.38 Telephony webhook route `/api/hooks/{tenant}/telephony/{provider}`; CallerDesk `verifyWebhook` + `parseWebhook`; port `resolveCustomerPhone_` + caller-leg cache (Redis) — route + verify (path secret) + parse per CallerDesk docs; 17 real webhooks processed 2026-10-02; legs explicit via Direction (no Redis leg cache needed)
 - [~] T1.38a Inbound: DID → process, find/create contact + lead, interaction, screen-pop to answering agent (match `agentPhone`)
 - [x] T1.38b Missed inbound: missed interaction, callback due now (owner or next eligible), one per number per day, `call.missed`
 - [x] T1.38c Stuck-call sweeper (5 min): `initiated` > 10 min → `unknown`, release locks, alert on silent provider
 - [x] T1.39 Recording copy to Blob/R2 + signed URL playback + audit — Calls screen (log, filters, totals, inline player), console timeline player, copy-recording → private Blob, /api/v1/calls/{id}/recording (scope-checked, audited), plus `sync-calls` every 15 min from CallerDesk call_list_v2 (2026-10-03)
-- [ ] T1.40 SSE `/api/v1/stream` (or 5 s poll of Redis counter) for new leads, inbound screen-pop and live call status
+- [~] T1.40 SSE `/api/v1/stream` (or 5 s poll of Redis counter) for new leads, inbound screen-pop and live call status — console polls every 2 s in a call / 20 s otherwise (incl. inbound screen-pop); SSE stream not built
 - [x] T1.47 Quick search: trigram + call-lookup indexes and `searchContacts()` done (on Neon); `GET /api/v1/search` + search box in the agent UI after sign-in — `GET /api/v1/leads?q=` + Leads screen + top-bar search
 - [x] T1.41 Conversion transaction (status won, converted_at, open_leads − 1, events)
 
@@ -118,7 +118,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [ ] T2.8 Stale-lead recycle cron (hourly); "agent leaves" bulk return to pool
 - [ ] T2.9 Webhook subscriptions CRUD, secret shown once, test-send
 - [~] T2.10 Delivery worker: HMAC signature, QStash retries, `webhook_deliveries`, auto-pause after 24 h
-- [ ] T2.11 Events: `lead.created`, `lead.assigned`, `disposition.set`, `lead.stage_changed`, `lead.converted`, `lead.lost`, `callback.missed`, `call.completed`, `call.missed`
+- [~] T2.11 Events: `lead.created`, `lead.assigned`, `disposition.set`, `lead.stage_changed`, `lead.converted`, `lead.lost`, `callback.missed`, `call.completed`, `call.missed` — events written to the outbox (lead.created/assigned, disposition.set, stage_changed, converted, lost, callback.missed, call.*); delivery needs T2.9 subscriptions screen
 - [ ] T2.12 Failed events screen + Replay (DLQ)
 - [ ] T2.13 Workflow engine: trigger → conditions → actions; `workflow_runs`
 - [ ] T2.14 Interakt adapter: template sync, send, status webhook, consent gate
@@ -131,10 +131,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 
 - [ ] T3.1 Daily rollup cron 00:30 (`$merge` into `daily_stats`)
 - [ ] T3.2 Dashboards: funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, week/month/quarter comparisons, day-of-week, stale leads, overdue callbacks
-- [ ] T3.3 CSV export (streamed; large → file + emailed link), masking by role, audit-logged
+- [~] T3.3 CSV export (streamed; large → file + emailed link), masking by role, audit-logged — Leads → Export (current filter, ≤10k rows, masked per role, audited) done 2026-10-02; large export → emailed link left
 - [ ] T3.4 Agent weekly report cron (Mon 08:00)
 - [ ] T3.5 Client portal: processes, masked leads, assigned reports
-- [ ] T3.6 Audit log viewer
+- [x] T3.6 Audit log viewer — Setup → Audit log + Login history (2026-10-02)
 - [ ] T3.7 Backups page: snapshots, backup now, download (fresh TOTP + 15-min URL), export CSV
 - [ ] T3.8 Restore: request → approve (two-person) → sandbox / selective / full; webhooks muted; `restore.completed`
 - [ ] T3.9 Weekly prune + verify (random-tenant restore test); monthly backup status email
@@ -144,7 +144,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [ ] T3.13 Move Neon to the Launch plan (point-in-time restore) + IP allow list; add a read replica for reports if needed
 - [ ] T3.14 Migrate remaining clients; set Apps Script sheets read-only
 - [ ] T3.15 Upgrade Vercel team to Pro (commercial use) and restore the 1-min / 5-min cron schedules in `vercel.json`
-- [~] T3.16 Create 1–2 Neon read replicas; set `DATABASE_REPLICA_URLS` in Vercel; move dashboard/report/export queries to `withTenantRead()`
+- [x] T3.16 Create 1–2 Neon read replicas; set `DATABASE_REPLICA_URLS` in Vercel; move dashboard/report/export queries to `withTenantRead()` — replica-1 live, DATABASE_REPLICA_URLS set, Floor/Leads/Calls/reports read via withTenantRead (least connections + failover)
 - [ ] T3.17 DR runbook + drill: restore latest backup into a Neon project in another region, repoint `DATABASE_URL`, measure RTO
 - [ ] T3.18 Uptime monitor on `/api/health` (alert when `ok:false` or any replica out of rotation)
 - [ ] **Gate 3:** all clients off Sheets; Apps Script read-only

@@ -5,7 +5,7 @@
  * process mapping. New user / reset password → password shown once.
  */
 import { useState, useTransition } from "react";
-import { BadgeCheck, KeyRound, Pencil, PhoneCall, Plus } from "lucide-react";
+import { BadgeCheck, KeyRound, Pencil, PhoneCall, Plus, Search, X } from "lucide-react";
 import { createUserAction, resetPasswordAction, testPhoneAction, updateUserAction } from "@/app/(app)/admin/actions";
 import { ChipPicker, ErrorNote, Field, GhostButton, Input, SecretOnce, Select, Submit } from "@/components/ui/form";
 import { Avatar, Tag } from "@/components/ui/primitives";
@@ -126,10 +126,48 @@ export function TeamPanel({ rows, processes, canEdit }: { rows: TeamRow[]; proce
   const [rowMsg, setRowMsg] = useState<{ id: string; text: string; ok: boolean } | null>(null);
   const [, startTransition] = useTransition();
   const procName = new Map(processes.map((p) => [p.id, p.name.split(" · ")[0]]));
+  // Find people quickly: name / email / phone digits, role, status, process.
+  const [q, setQ] = useState("");
+  const [roleF, setRoleF] = useState("");
+  const [statusF, setStatusF] = useState("");
+  const [procF, setProcF] = useState("");
+  const needle = q.trim().toLowerCase();
+  const digits = needle.replace(/\D/g, "");
+  const shown = rows.filter(
+    (u) =>
+      (!needle || u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle) || (digits.length >= 3 && (u.agentPhoneE164 ?? "").includes(digits))) &&
+      (!roleF || u.role === roleF) &&
+      (!statusF || u.status === statusF) &&
+      (!procF || u.processIds.includes(procF)),
+  );
+  const narrowed = !!(q || roleF || statusF || procF);
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex h-9 w-full max-w-[300px] items-center gap-2 rounded-md border border-rule bg-sheet px-2.5 focus-within:border-ink">
+          <Search size={14} className="text-ink-3" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email or phone digits" className="w-full bg-transparent text-[12.5px] outline-none" aria-label="Search team" />
+          {q && <button onClick={() => setQ("")} aria-label="Clear"><X size={13} className="text-ink-3" /></button>}
+        </label>
+        <select value={roleF} onChange={(e) => setRoleF(e.target.value)} aria-label="Role" className="h-9 rounded-md border border-rule bg-sheet px-2.5 text-[12.5px]">
+          <option value="">All roles</option>
+          {(Object.keys(ROLE_LABEL) as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+        </select>
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} aria-label="Status" className="h-9 rounded-md border border-rule bg-sheet px-2.5 text-[12.5px]">
+          <option value="">Any status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="locked">Locked</option>
+        </select>
+        {processes.length > 0 && (
+          <select value={procF} onChange={(e) => setProcF(e.target.value)} aria-label="Process" className="h-9 rounded-md border border-rule bg-sheet px-2.5 text-[12.5px]">
+            <option value="">All processes</option>
+            {processes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
+        {narrowed && <span className="text-[12px] text-ink-3">{shown.length} of {rows.length}</span>}
+        <span className="flex-1" />
         {canEdit && editing === null && (
           <button onClick={() => setEditing("new")} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-semibold text-sheet hover:bg-ink-2">
             <Plus size={14} /> New user
@@ -167,7 +205,7 @@ export function TeamPanel({ rows, processes, canEdit }: { rows: TeamRow[]; proce
             </tr>
           </thead>
           <tbody>
-            {rows.map((u) =>
+            {shown.map((u) =>
               editing === u.id ? (
                 <tr key={u.id}>
                   <td colSpan={7} className="p-3">

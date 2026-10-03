@@ -3,13 +3,14 @@
  * Security). audit_logs is append-only for the app role (no UPDATE/DELETE,
  * 0001_rls.sql) and tenant-isolated by RLS. Keyset paging on (created_at, id).
  */
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import { auditLogs, users } from "@/lib/db/schema";
 import { withTenantRead } from "@/lib/db/tenant";
 import { requirePermission } from "@/lib/auth/rbac";
 import type { SessionContext } from "@/lib/auth/session";
 
-export async function listAudit(ctx: SessionContext, cursor?: string, limit = 50) {
+/** `q` matches the action (e.g. "lead", "password", "api_key") or the person's name. */
+export async function listAudit(ctx: SessionContext, cursor?: string, limit = 50, q?: string) {
   requirePermission(ctx, "audit", "V");
   const [cAt, cId] = (cursor ?? "").split("|");
   const after = cAt && cId ? or(lt(auditLogs.createdAt, new Date(cAt)), and(eq(auditLogs.createdAt, new Date(cAt)), lt(auditLogs.id, cId))) : undefined;
@@ -18,7 +19,7 @@ export async function listAudit(ctx: SessionContext, cursor?: string, limit = 50
       .select({ id: auditLogs.id, action: auditLogs.action, entity: auditLogs.entity, after: auditLogs.after, at: auditLogs.createdAt, who: users.name })
       .from(auditLogs)
       .leftJoin(users, eq(users.id, auditLogs.actorId))
-      .where(after)
+      .where(and(after, q ? or(ilike(auditLogs.action, `%${q.replace(/[%_\\]/g, "\\$&")}%`), ilike(users.name, `%${q.replace(/[%_\\]/g, "\\$&")}%`)) : undefined))
       .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
       .limit(limit + 1),
   );

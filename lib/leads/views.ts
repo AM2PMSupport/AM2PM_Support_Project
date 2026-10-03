@@ -34,7 +34,7 @@ export async function saveView(ctx: SessionContext, input: z.infer<typeof ViewIn
   if (input.shared && !can(ctx.actor.role, "config", "E")) throw forbidden("Only admins can share a filter with everyone");
   // Keep only params the Leads screen understands; never paging state.
   const known = Object.keys(LeadQuery.shape).filter((k) => k !== "cursor");
-  const query = Object.fromEntries(Object.entries(input.query).filter(([k, v]) => known.includes(k) && v));
+  const query = Object.fromEntries(Object.entries(input.query).filter(([k, v]) => (known.includes(k) || /^cf_[a-z0-9_]{1,40}$/.test(k)) && v));
   LeadQuery.parse(query);
   const [v] = await withTenant(ctx, (tx) => tx.insert(savedViews).values({ userId: ctx.actor.userId, name: input.name, query, shared: input.shared }).returning({ id: savedViews.id }));
   return { id: v!.id };

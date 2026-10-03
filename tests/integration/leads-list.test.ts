@@ -274,3 +274,70 @@ describe("console inline editing", () => {
     expect(rows.find((r) => r.id === theirs!.id)!.status).toBe("initiated");
   });
 });
+
+describe("console process filter", () => {
+  it("queue can be limited to processes (in SQL); process choices follow access", async () => {
+    const { getQueue, myProcesses } = await import("@/lib/agent/queue");
+    const other = await withTenant(admin, async (tx) => {
+      const [p] = await tx.insert(s.processes).values({ name: "Zeta Support", stages: ["New"], wonStage: "New", assignment: { method: "equal", sticky: false, slaMinutes: 15 } }).returning();
+      const [c] = await tx.insert(s.contacts).values({ name: "Zeta Lead", phoneE164: "+919700099999", phoneKey: "9700099999" }).returning();
+      await tx.insert(s.leads).values({ processId: p!.id, contactId: c!.id, source: { kind: "manual" }, stage: "New", dedupeKey: "9700099999" });
+      return p!.id;
+    });
+    const all = await getQueue(admin);
+    expect(all.some((l) => l.processId === other)).toBe(true);
+    const onlySales = await getQueue(admin, 150, { process: processId });
+    expect(onlySales.length).toBeGreaterThan(0);
+    expect(onlySales.every((l) => l.processId === processId)).toBe(true);
+    expect((await getQueue(admin, 150, { process: other })).map((l) => l.name)).toEqual(["Zeta Lead"]);
+    // Admin sees every active process; an agent only the ones they're mapped to.
+    expect((await myProcesses(admin)).map((p) => p.name).sort()).toEqual(["Sales", "Zeta Support"]);
+    expect((await myProcesses(agentA)).map((p) => p.name)).toEqual(["Sales"]);
+  });
+});
+
+describe("column, system and custom-field filters (shared by Leads + console)", () => {
+  it("custom fields by type, campaign/outcome/city/attempts, date ranges, new system filters", async () => {
+    const { parseCustomFilters } = await import("@/lib/leads/list");
+    const { getQueue } = await import("@/lib/agent/queue");
+    const mkLead = (name: string, phone: string, extra: Partial<typeof s.leads.$inferInsert>, email?: string) =>
+      withTenant(admin, async (tx) => {
+        const [c] = await tx.insert(s.contacts).values({ name, phoneE164: phone ? `+91${phone}` : null, phoneKey: phone || null, email: email ?? null }).returning();
+        const [l] = await tx.insert(s.leads).values({ processId, contactId: c!.id, stage: "New", dedupeKey: phone || crypto.randomUUID(), source: { kind: "manual" }, ...extra }).returning();
+        return l!.id;
+      });
+    const a = await mkLead("CF Alpha", "9600000001", { custom: { budget: "12", visit: "2026-10-05", course: "MBA", site_visit: true, city: "Pune" }, source: { kind: "manual", campaign: "Diwali" }, attempts: 3, lastDisposition: { code: "BUSY", label: "Busy", category: "neutral", at: new Date().toISOString() } }, "alpha@x.in");
+    const b = await mkLead("CF Beta", "9600000002", { custom: { budget: "30", visit: "2026-11-20", course: "BBA", site_visit: "no", city: "Mumbai" }, attempts: 0 });
+    await mkLead("CF Gamma", "", { custom: { budget: "not a number", course: "MBA" }, createdAt: new Date("2026-01-15T06:00:00Z") });
+
+    const names = async (q: Record<string, string>) => (await listLeads(admin, { status: "all", q: "CF", ...q })).items.map((r) => r.name).sort();
+    expect(await names({})).toEqual(["CF Alpha", "CF Beta", "CF Gamma"]);
+    // Custom fields
+    expect(await names({ cf_budget: "n:10..20" })).toEqual(["CF Alpha"]); // "not a number" never breaks the query
+    expect(await names({ cf_budget: "n:25.." })).toEqual(["CF Beta"]);
+    expect(await names({ cf_visit: "d:2026-10-01..2026-10-31" })).toEqual(["CF Alpha"]);
+    expect(await names({ cf_course: "=MBA" })).toEqual(["CF Alpha", "CF Gamma"]);
+    expect(await names({ cf_course: "=MBA|BBA" })).toEqual(["CF Alpha", "CF Beta", "CF Gamma"]);
+    expect(await names({ cf_city: "~pun" })).toEqual(["CF Alpha"]);
+    expect(await names({ cf_site_visit: "b:yes" })).toEqual(["CF Alpha"]);
+    expect(await names({ cf_site_visit: "b:no" })).toEqual(["CF Beta", "CF Gamma"]);
+    // Columns
+    expect(await names({ campaign: "Diwali" })).toEqual(["CF Alpha"]);
+    expect(await names({ outcome: "Busy" })).toEqual(["CF Alpha"]);
+    expect(await names({ city: "mum" })).toEqual(["CF Beta"]);
+    expect(await names({ attempts_min: "1" })).toEqual(["CF Alpha"]);
+    expect(await names({ attempts_max: "0" })).toEqual(["CF Beta", "CF Gamma"]);
+    expect(await names({ created_from: "2026-01-01", created_to: "2026-01-31" })).toEqual(["CF Gamma"]);
+    // System filters
+    expect(await names({ flag: "has_email" })).toEqual(["CF Alpha"]);
+    expect(await names({ flag: "no_phone" })).toEqual(["CF Gamma"]);
+    expect(await names({ flag: "touched" })).toEqual(["CF Alpha"]);
+    expect(await names({ flag: "stale_7d" })).toEqual(["CF Gamma"]);
+    expect(await names({ flag: "has_email,touched" })).toEqual(["CF Alpha"]); // AND
+    // Same filter in the console queue (open leads, same SQL)
+    expect((await getQueue(admin, 150, { q: "CF", cf_budget: "n:10..20" })).map((l) => l.id)).toEqual([a]);
+    expect((await getQueue(admin, 150, { q: "CF", cf_course: "=BBA" })).map((l) => l.id)).toEqual([b]);
+    // Garbage cf params are ignored, never injected
+    expect(parseCustomFilters({ "cf_x; drop table leads": "~a", cf_ok: "n:abc..", cf_d: "d:yesterday.." })).toEqual([{ key: "ok", op: "num", min: undefined, max: undefined }, { key: "d", op: "date", from: undefined, to: undefined }]);
+  });
+});

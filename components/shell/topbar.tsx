@@ -30,9 +30,9 @@ export function ShiftClock() {
   const now = useIstClock();
   const fmt = (o: Intl.DateTimeFormatOptions) => (now ? new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", ...o }).format(now) : "");
   return (
-    <div className="flex items-baseline gap-2" aria-live="off">
+    <div className="hidden shrink-0 items-baseline gap-2 whitespace-nowrap sm:flex" aria-live="off">
       <span className="font-mono text-[15px] font-medium tnum text-ink">{now ? fmt({ hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "--:--:--"}</span>
-      <span className="text-[11px] text-ink-3">IST · {fmt({ weekday: "short", day: "numeric", month: "short" })}</span>
+      <span className="hidden text-[11px] text-ink-3 lg:inline">IST · {fmt({ weekday: "short", day: "numeric", month: "short" })}</span>
     </div>
   );
 }

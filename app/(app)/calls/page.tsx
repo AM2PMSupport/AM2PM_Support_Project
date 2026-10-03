@@ -30,9 +30,10 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
     seeAgents ? leadFilterOptions(ctx) : Promise.resolve(null),
   ]);
   return (
-    <div className="flex min-h-dvh flex-col">
+    // Fixed frame like Leads: filters on top, the log scrolls inside, paging pinned.
+    <div className="flex h-dvh flex-col">
       <Topbar title="Calls" subtitle={`${seeAgents ? "All calls you can see" : "Your calls"} · recordings, durations, results · ${ctx.tenantName}`} />
-      <div className="px-6 py-5">
+      <div className="flex min-h-0 flex-1 flex-col px-4 pt-3 pb-2 md:px-6">
         <Suspense>
           <CallsLog
             rows={page.items}

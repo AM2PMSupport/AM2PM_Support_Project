@@ -11,7 +11,7 @@
  */
 import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { contacts, leads, processes, users } from "@/lib/db/schema";
+import { contacts, customFieldDefinitions, leads, processes, users } from "@/lib/db/schema";
 import { withTenantRead } from "@/lib/db/tenant";
 import type { SessionContext } from "@/lib/auth/session";
 import { leadScopeCondition } from "@/lib/leads/scope";
@@ -41,7 +41,25 @@ export interface LeadRow {
   deletedAt: string | null;
 }
 
-export const FLAGS = ["unassigned", "not_called", "callback_overdue", "callback_today", "re_enquired", "mine"] as const;
+/** System-defined filters (checkboxes on Leads and in the console). */
+export const FLAGS = [
+  "mine",
+  "unassigned",
+  "assigned",
+  "not_called",
+  "touched",
+  "callback_overdue",
+  "callback_today",
+  "has_callback",
+  "no_callback",
+  "re_enquired",
+  "stale_7d",
+  "has_email",
+  "no_email",
+  "no_phone",
+  "converted_today",
+] as const;
+const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "use yyyy-mm-dd").optional();
 export const SORTS = ["newest", "oldest", "name", "callback", "activity"] as const;
 const csv = z.string().max(2000).optional().transform((v) => (v ? v.split(",").filter(Boolean).slice(0, 50) : []));
 
@@ -56,6 +74,18 @@ export const LeadQuery = z.object({
   process: csv,
   flag: csv.transform((f) => f.filter((x): x is (typeof FLAGS)[number] => (FLAGS as readonly string[]).includes(x))),
   created: z.enum(["today", "7d", "30d"]).optional(),
+  /** Column filters. Dates are calendar days in the workspace timezone (inclusive). */
+  campaign: csv,
+  outcome: csv, // last outcome labels
+  city: z.string().max(60).optional(), // contains
+  attempts_min: z.coerce.number().int().min(0).max(1000).optional(),
+  attempts_max: z.coerce.number().int().min(0).max(1000).optional(),
+  created_from: DATE,
+  created_to: DATE,
+  activity_from: DATE,
+  activity_to: DATE,
+  callback_from: DATE,
+  callback_to: DATE,
   sort: z.enum(SORTS).default("newest"),
   // The UI offers 25 / 50 / 100; the API accepts 1–100.
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -64,8 +94,69 @@ export const LeadQuery = z.object({
   /** Previous page: rows before this cursor (keyset backwards — still no OFFSET). */
   before: z.string().max(300).optional(),
 });
-export type LeadQueryInput = z.input<typeof LeadQuery>;
+/**
+ * Custom-field filters ride alongside as `cf_<key>` params (one per field):
+ *   text     cf_city=~pune            contains
+ *   dropdown cf_course==MBA|BBA        any of
+ *   number   cf_budget=n:5..20         from..to (either side may be empty)
+ *   date     cf_visit=d:2026-10-01..2026-10-31
+ *   yes/no   cf_site_visit=b:yes
+ */
+export type CustomFilterKey = `cf_${string}`;
+export type LeadQueryInput = z.input<typeof LeadQuery> & Partial<Record<CustomFilterKey, string>>;
 type Query = z.output<typeof LeadQuery>;
+
+export type CustomFilter =
+  | { key: string; op: "contains"; value: string }
+  | { key: string; op: "in"; values: string[] }
+  | { key: string; op: "num"; min?: number; max?: number }
+  | { key: string; op: "date"; from?: string; to?: string }
+  | { key: string; op: "bool"; value: boolean };
+
+const CF_KEY = /^cf_([a-z0-9_]{1,40})$/;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Parse `cf_*` params (unknown/garbled ones are ignored, never trusted into SQL as text). */
+export function parseCustomFilters(raw: Record<string, unknown>): CustomFilter[] {
+  const out: CustomFilter[] = [];
+  for (const [k, v] of Object.entries(raw)) {
+    const key = CF_KEY.exec(k)?.[1];
+    if (!key || typeof v !== "string" || !v || v.length > 300) continue;
+    if (v.startsWith("~")) out.push({ key, op: "contains", value: v.slice(1).trim() });
+    else if (v.startsWith("=")) out.push({ key, op: "in", values: v.slice(1).split("|").map((x) => x.trim()).filter(Boolean).slice(0, 30) });
+    else if (v.startsWith("n:")) {
+      const [a, b] = v.slice(2).split("..");
+      const n = (x?: string) => (x !== undefined && x.trim() !== "" && Number.isFinite(Number(x)) ? Number(x) : undefined);
+      out.push({ key, op: "num", min: n(a), max: n(b) });
+    } else if (v.startsWith("d:")) {
+      const [a, b] = v.slice(2).split("..");
+      out.push({ key, op: "date", from: a && ISO_DAY.test(a) ? a : undefined, to: b && ISO_DAY.test(b) ? b : undefined });
+    } else if (v.startsWith("b:")) out.push({ key, op: "bool", value: /^(yes|true|1)$/i.test(v.slice(2)) });
+  }
+  return out;
+}
+
+function customCondition(f: CustomFilter): SQL | undefined {
+  const val = sql`(${leads.custom} ->> ${f.key})`;
+  switch (f.op) {
+    case "contains":
+      return f.value ? sql`${val} ilike ${`%${escapeLike(f.value)}%`}` : undefined;
+    case "in":
+      return f.values.length ? inArray(val, f.values) : undefined;
+    case "num": {
+      // Only numeric-looking values are compared (a text value never breaks the query).
+      const num = sql`(case when ${val} ~ '^-?[0-9]+([.][0-9]+)?$' then (${val})::numeric end)`;
+      return and(f.min !== undefined ? sql`${num} >= ${f.min}` : undefined, f.max !== undefined ? sql`${num} <= ${f.max}` : undefined, sql`${num} is not null`);
+    }
+    case "date": {
+      // Dates are stored as ISO strings; compare the yyyy-mm-dd prefix.
+      const day = sql`left(${val}, 10)`;
+      return and(f.from ? sql`${day} >= ${f.from}` : undefined, f.to ? sql`${day} <= ${f.to}` : undefined, sql`${val} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'`);
+    }
+    case "bool":
+      return f.value ? sql`lower(${val}) in ('true','yes','1')` : sql`(${val} is null or lower(${val}) in ('false','no','0'))`;
+  }
+}
 
 function searchCondition(q: string | undefined): SQL | undefined {
   const c = q ? classifyQuery(q) : null;
@@ -87,26 +178,65 @@ function searchCondition(q: string | undefined): SQL | undefined {
 const dayStart = (tz: string) => sql`(date_trunc('day', now() at time zone ${tz}) at time zone ${tz})`;
 const pendingCallback = (extra: SQL) => sql`exists (select 1 from callbacks c where c.lead_id = ${leads.id} and c.status = 'pending' and ${extra})`;
 
-function filterConditions(ctx: SessionContext, f: Query): (SQL | undefined)[] {
+/** Day boundary in the workspace timezone for a yyyy-mm-dd (start of that day). */
+const dayAt = (d: string, tz: string) => sql`((${d})::date::timestamp at time zone ${tz})`;
+const dayRange = (col: SQL, from: string | undefined, to: string | undefined, tz: string) =>
+  and(from ? sql`${col} >= ${dayAt(from, tz)}` : undefined, to ? sql`${col} < ${dayAt(to, tz)} + interval '1 day'` : undefined);
+
+function filterConditions(ctx: SessionContext, f: Query, custom: CustomFilter[] = []): (SQL | undefined)[] {
   const tz = ctx.timezone;
   const owners = f.owner.filter((o) => o !== "none");
+  const has = (x: (typeof FLAGS)[number]) => f.flag.includes(x);
   return [
     f.status === "all" || f.status === "deleted" ? undefined : eq(leads.status, f.status),
     f.stage.length ? inArray(leads.stage, f.stage) : undefined,
     f.source.length ? inArray(sql`${leads.source}->>'kind'`, f.source) : undefined,
     f.process.length ? inArray(leads.processId, f.process) : undefined,
     f.owner.length ? or(owners.length ? inArray(leads.assignedTo, owners) : undefined, f.owner.includes("none") ? isNull(leads.assignedTo) : undefined) : undefined,
-    f.flag.includes("unassigned") ? isNull(leads.assignedTo) : undefined,
-    f.flag.includes("mine") ? eq(leads.assignedTo, ctx.actor.userId) : undefined,
-    f.flag.includes("not_called") ? eq(leads.attempts, 0) : undefined,
-    f.flag.includes("callback_overdue") ? pendingCallback(sql`c.due_at < now()`) : undefined,
-    f.flag.includes("callback_today") ? pendingCallback(sql`c.due_at >= ${dayStart(tz)} and c.due_at < ${dayStart(tz)} + interval '1 day'`) : undefined,
-    f.flag.includes("re_enquired") ? sql`${leads.lastEnquiryAt} > ${leads.createdAt} + interval '1 minute'` : undefined,
+    // System filters
+    has("unassigned") ? isNull(leads.assignedTo) : undefined,
+    has("assigned") ? isNotNull(leads.assignedTo) : undefined,
+    has("mine") ? eq(leads.assignedTo, ctx.actor.userId) : undefined,
+    has("not_called") ? eq(leads.attempts, 0) : undefined,
+    has("touched") ? sql`${leads.attempts} > 0` : undefined,
+    has("callback_overdue") ? pendingCallback(sql`c.due_at < now()`) : undefined,
+    has("callback_today") ? pendingCallback(sql`c.due_at >= ${dayStart(tz)} and c.due_at < ${dayStart(tz)} + interval '1 day'`) : undefined,
+    has("has_callback") ? pendingCallback(sql`true`) : undefined,
+    has("no_callback") ? sql`not ${pendingCallback(sql`true`)}` : undefined,
+    has("re_enquired") ? sql`${leads.lastEnquiryAt} > ${leads.createdAt} + interval '1 minute'` : undefined,
+    has("stale_7d") ? sql`coalesce(${leads.lastInteractionAt}, ${leads.createdAt}) < now() - interval '7 days'` : undefined,
+    has("has_email") ? sql`${contacts.email} is not null and ${contacts.email} <> ''` : undefined,
+    has("no_email") ? sql`(${contacts.email} is null or ${contacts.email} = '')` : undefined,
+    has("no_phone") ? isNull(contacts.phoneE164) : undefined,
+    has("converted_today") ? and(eq(leads.status, "won"), gte(leads.convertedAt, sql`${dayStart(tz)}`)) : undefined,
+    // Created presets + range
     f.created === "today" ? gte(leads.createdAt, sql`${dayStart(tz)}`) : undefined,
     f.created === "7d" ? gte(leads.createdAt, sql`now() - interval '7 days'`) : undefined,
     f.created === "30d" ? gte(leads.createdAt, sql`now() - interval '30 days'`) : undefined,
+    dayRange(sql`${leads.createdAt}`, f.created_from, f.created_to, tz),
+    dayRange(sql`coalesce(${leads.lastInteractionAt}, ${leads.createdAt})`, f.activity_from, f.activity_to, tz),
+    dayRange(sql`${leads.nextCallbackAt}`, f.callback_from, f.callback_to, tz),
+    // Column filters
+    f.campaign.length ? inArray(sql`${leads.source}->>'campaign'`, f.campaign) : undefined,
+    f.outcome.length ? inArray(sql`${leads.lastDisposition}->>'label'`, f.outcome) : undefined,
+    f.city ? sql`${leads.custom}->>'city' ilike ${`%${escapeLike(f.city)}%`}` : undefined,
+    f.attempts_min !== undefined ? gte(leads.attempts, f.attempts_min) : undefined,
+    f.attempts_max !== undefined ? sql`${leads.attempts} <= ${f.attempts_max}` : undefined,
+    ...custom.map(customCondition),
     searchCondition(f.q),
   ];
+}
+
+/**
+ * The WHERE for a lead filter — shared by the Leads list, the console queue,
+ * REST and GraphQL so a filter behaves identically everywhere. Excludes
+ * deleted leads (except the Recycle bin view) and applies the role's scope.
+ */
+export function leadFilterWhere(ctx: SessionContext, raw: LeadQueryInput): SQL | undefined {
+  const f = LeadQuery.parse(raw);
+  const bin = f.status === "deleted";
+  const alive = bin ? (can(ctx.actor.role, "leads", "D") ? isNotNull(leads.deletedAt) : sql`false`) : and(eq(leads.isActive, true), isNull(leads.deletedAt));
+  return and(leadScopeCondition(ctx), alive, ...filterConditions(ctx, f, parseCustomFilters(raw as Record<string, unknown>)));
 }
 
 /** Sort expression + direction. Nulls are mapped to sentinels so the keyset comparison is total. */
@@ -145,10 +275,8 @@ export async function listLeads(
 ): Promise<{ items: LeadRow[]; nextCursor: string | null; prevCursor: string | null; total: number }> {
   const f = LeadQuery.parse(input);
   const s = sortSpec(f.sort);
-  const bin = f.status === "deleted";
-  // Recycle bin only for roles that may delete; everyone else sees live leads only.
-  const alive = bin ? (can(ctx.actor.role, "leads", "D") ? isNotNull(leads.deletedAt) : sql`false`) : and(eq(leads.isActive, true), isNull(leads.deletedAt));
-  const where = and(leadScopeCondition(ctx), alive, ...filterConditions(ctx, f));
+  // Recycle bin only for roles that may delete; everyone else sees live leads only (inside leadFilterWhere).
+  const where = leadFilterWhere(ctx, input);
   // Going back = walk the keyset in the opposite direction, then flip the page.
   const back = !!f.before && !f.cursor;
   const cur = decodeCursor(back ? f.before : f.cursor);
@@ -247,7 +375,28 @@ export async function leadFilterOptions(ctx: SessionContext) {
         .orderBy(users.name),
       await tx.select({ id: processes.id, name: processes.name, stages: processes.stages }).from(processes).where(eq(processes.status, "active")).orderBy(processes.name),
     ];
-    return { stages, sources, owners, processes: procs };
+    const campaigns = await tx
+      .select({ v: sql<string>`${leads.source}->>'campaign'`, n: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(and(scope, sql`${leads.source}->>'campaign' is not null`))
+      .groupBy(sql`1`)
+      .orderBy(desc(sql`2`))
+      .limit(50);
+    const outcomes = await tx
+      .select({ v: sql<string>`${leads.lastDisposition}->>'label'`, n: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(and(scope, sql`${leads.lastDisposition} is not null`))
+      .groupBy(sql`1`)
+      .orderBy(desc(sql`2`))
+      .limit(50);
+    // Custom fields defined for leads (workspace-wide + per process), one entry per key.
+    const defs = await tx
+      .select({ key: customFieldDefinitions.key, label: customFieldDefinitions.label, type: customFieldDefinitions.type, options: customFieldDefinitions.options })
+      .from(customFieldDefinitions)
+      .where(and(eq(customFieldDefinitions.isActive, true), eq(customFieldDefinitions.entity, "lead")))
+      .orderBy(customFieldDefinitions.sortOrder, customFieldDefinitions.label);
+    const fields = [...new Map(defs.map((d) => [d.key, d])).values()];
+    return { stages, sources, owners, processes: procs, campaigns, outcomes, fields };
   });
 }
 
