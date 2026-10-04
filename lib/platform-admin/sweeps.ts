@@ -6,13 +6,14 @@
  * work and hands it to per-tenant code or jobs, except for purely technical
  * updates (stuck-call status, retention purge).
  */
-import { and, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { interactions, leads, outbox, webhookDeliveries, webhookEvents } from "@/lib/db/schema";
 import { publishOutbox } from "@/lib/events/outbox";
 import { enqueue } from "@/lib/queue/qstash";
 import { releaseCallLock } from "@/lib/telephony/lock";
 import { platformDb } from "@/lib/platform-admin/db";
 import { contextForTenantId } from "@/lib/platform-admin/tenants";
+import { assignLead } from "@/lib/assignment/assign";
 import { log } from "@/lib/log";
 
 const BATCH = 500;
@@ -35,20 +36,67 @@ export async function relayOutbox(): Promise<number> {
   return stale.length;
 }
 
-/** Leads still unassigned (e.g. arrived at night): queue another attempt. */
-export async function sweepUnassigned(): Promise<number> {
+/**
+ * Leads still unassigned (e.g. arrived at night, or no agent was free):
+ * try again INLINE, oldest first, within a time budget.
+ *
+ * Not one QStash message per lead: leads that can never be assigned (a
+ * process with no mapped agents) were re-queued every run and used up the
+ * free plan's 1,000 messages/day by mid-morning, which then stopped every
+ * schedule and webhook (2026-10-03, MEMORIE.md). Assignment is DB-only, so
+ * doing it here costs no messages; whatever the budget leaves is picked up
+ * by the next run.
+ */
+export async function sweepUnassigned(budgetMs = 20_000): Promise<{ tried: number; assigned: number }> {
+  const started = Date.now();
   const rows = await platformDb()
     .select({ id: leads.id, tenantId: leads.tenantId })
     .from(leads)
     .where(and(isNull(leads.assignedTo), eq(leads.status, "open"), eq(leads.isActive, true)))
+    .orderBy(asc(leads.createdAt))
     .limit(BATCH);
-  // 5-minute buckets in the dedupe id so each sweep can retry the same lead once.
-  const bucket = Math.floor(Date.now() / 300_000);
+  const ctxs = new Map<string, Awaited<ReturnType<typeof contextForTenantId>>["ctx"]>();
+  let tried = 0;
+  let assigned = 0;
   for (const l of rows) {
-    await enqueue("assign-lead", { tenantId: l.tenantId, leadId: l.id }, { deduplicationId: `assign:${l.id}:${bucket}` });
+    if (Date.now() - started > budgetMs) break;
+    let ctx = ctxs.get(l.tenantId);
+    if (!ctx) ctxs.set(l.tenantId, (ctx = (await contextForTenantId(l.tenantId)).ctx));
+    tried++;
+    try {
+      if ((await assignLead(ctx, l.id)).outcome === "assigned") assigned++;
+    } catch (err) {
+      log.error("sweep-unassigned: lead failed", { tenant: ctx.tenantSlug, err }); // next run retries
+    }
   }
   // TODO(T1.31): alert supervisors for leads waiting longer than the process slaMinutes.
-  return rows.length;
+  return { tried, assigned };
+}
+
+/**
+ * Webhooks stored but never queued: QStash refused the publish (quota, outage)
+ * and the provider's retry then looked like a duplicate, so nothing would ever
+ * process them. Re-queue those still "received" after 2 minutes (last 2 days).
+ */
+export async function requeueStuckWebhooks(): Promise<number> {
+  const stuck = await platformDb()
+    .select({ id: webhookEvents.id, tenantId: webhookEvents.tenantId })
+    .from(webhookEvents)
+    .where(
+      and(
+        eq(webhookEvents.status, "received"),
+        lt(webhookEvents.createdAt, new Date(Date.now() - 2 * 60_000)),
+        gt(webhookEvents.createdAt, new Date(Date.now() - 2 * DAY_MS)),
+      ),
+    )
+    .orderBy(asc(webhookEvents.createdAt))
+    .limit(100);
+  const bucket = Math.floor(Date.now() / (15 * 60_000)); // one retry per sweep
+  for (const w of stuck) {
+    await enqueue("process-webhook", { tenantId: w.tenantId, webhookEventId: w.id }, { deduplicationId: `wh-requeue:${w.id}:${bucket}` });
+  }
+  if (stuck.length) log.warn("re-queued webhooks that were never processed", { count: stuck.length });
+  return stuck.length;
 }
 
 /** Click-to-calls with no webhook for 10 minutes → "unknown"; free the agent. */

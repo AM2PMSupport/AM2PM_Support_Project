@@ -10,6 +10,7 @@ import { useState, useTransition } from "react";
 import { X } from "lucide-react";
 import { createLeadAction } from "@/app/(app)/leads/actions";
 import { ErrorNote, Field, Input, Select } from "@/components/ui/form";
+import { Portal } from "@/components/ui/portal";
 
 export function CreateLead({
   processes,
@@ -27,6 +28,7 @@ export function CreateLead({
   const [processId, setProcessId] = useState(processes[0]?.id ?? "");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [altPhone, setAltPhone] = useState("");
   const [email, setEmail] = useState("");
   const [city, setCity] = useState("");
   const [note, setNote] = useState("");
@@ -39,7 +41,7 @@ export function CreateLead({
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const r = await createLeadAction({ processId, name, phone, email, city, note, ownerId: ownerId || undefined });
+      const r = await createLeadAction({ processId, name, phone, altPhone, email, city, note, ownerId: ownerId || undefined });
       if (!r.ok) return setError(r.error);
       setDone({ leadId: r.data!.leadId, merged: r.data!.outcome === "merged" });
       onCreated();
@@ -47,7 +49,8 @@ export function CreateLead({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-ink/25" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <Portal>
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink/25" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-label="Create lead" className="flex h-full w-[420px] flex-col bg-sheet shadow-[-20px_0_60px_-20px_rgba(21,23,28,0.35)]">
         <header className="flex items-center justify-between border-b border-rule px-5 py-4">
           <div>
@@ -69,6 +72,7 @@ export function CreateLead({
                   setDone(null);
                   setName("");
                   setPhone("");
+                  setAltPhone("");
                   setEmail("");
                   setCity("");
                   setNote("");
@@ -88,6 +92,7 @@ export function CreateLead({
             </Field>
             <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoFocus /></Field>
             <Field label="Mobile" hint="10-digit Indian mobile; +91 optional"><Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" maxLength={20} /></Field>
+            <Field label="Mobile 2" hint="Optional second number — both can be called"><Input value={altPhone} onChange={(e) => setAltPhone(e.target.value)} inputMode="tel" maxLength={20} /></Field>
             <Field label="Email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} /></Field>
             <Field label="City"><Input value={city} onChange={(e) => setCity(e.target.value)} maxLength={60} /></Field>
             <Field label="Note">
@@ -112,5 +117,6 @@ export function CreateLead({
         )}
       </div>
     </div>
+    </Portal>
   );
 }

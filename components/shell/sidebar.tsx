@@ -15,6 +15,7 @@ import { LogoMark } from "@/components/ui/logo";
 import type { AgentStatus } from "@/lib/ui/sample-data";
 import { STATUS_META } from "@/lib/ui/status";
 import { ProfileMenu, workspaceInitials } from "@/components/shell/profile-menu";
+import { Portal } from "@/components/ui/portal";
 
 const NAV = [
   { key: "console", href: "/console", label: "Console", icon: Headset },
@@ -101,7 +102,12 @@ export function Sidebar({
           )}
         </div>
       </div>
-      {menu && <ProfileMenu user={user} workspace={workspace} onClose={() => setMenu(false)} />}
+      {/* Portal: the sticky sidebar is its own stacking context; inside it the menu fell under page content. */}
+      {menu && (
+        <Portal>
+          <ProfileMenu user={user} workspace={workspace} onClose={() => setMenu(false)} />
+        </Portal>
+      )}
     </aside>
   );
 }

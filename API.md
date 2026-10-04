@@ -65,7 +65,7 @@ The login is one per person across workspaces (SECURITY.md §3.1); sign-in opens
 The agent's **Call** button. API click-to-call only, no SIP: the provider rings the agent's registered phone first, then the customer, and bridges them. Live status then arrives from provider webhooks.
 
 - Auth: session (agent or above).
-- Body: none.
+- Body: optional. `{ "number": "alt" }` dials the contact's **Mobile 2**; none (or `"primary"`) dials the main number. The dialled number is stored on the call.
 
 **202 Accepted**
 ```json
@@ -75,11 +75,12 @@ The agent's **Call** button. API click-to-call only, no SIP: the provider rings 
 | HTTP | Code | When |
 | --- | --- | --- |
 | 400 | `bad_request` | `id` is not a UUID |
+| 400 | `invalid_json` / `invalid_input` | Body is not JSON, or `number` is not `primary`/`alt` |
 | 403 | `forbidden` | Agent calling a lead not assigned to them |
 | 403 | `dnc` | Contact or lead is Do Not Call |
 | 404 | `not_found` | Lead not found (or belongs to another tenant) |
 | 409 | `already_on_call` | Agent already has a live call |
-| 422 | `no_phone` / `no_agent_phone` / `no_telephony` / `no_did` | Contact phone, agent phone, provider or caller-ID DID missing |
+| 422 | `no_phone` / `no_agent_phone` / `no_telephony` / `no_did` | Contact phone (or Mobile 2 when `number: "alt"`), agent phone, provider or caller-ID DID missing |
 | 502 | `not_configured`, `provider_unreachable`, `invalid_did`, `no_balance`, `auth_failed`, `provider_error` | Provider refused; `message` is written for the agent |
 
 ### 3.2 `POST /api/hooks/{tenant}/{sourceId}` — lead-source webhook
@@ -99,7 +100,7 @@ curl -X POST "https://am2pmsupportproject.vercel.app/api/hooks/flo-mattress/7b1e
 ```
 `duplicate: true` = the same body was already received; nothing new is queued.
 
-Field mapping is per source (`import_sources.field_map`, e.g. `{"phone_number":"phone","city":"custom.city"}`); unmapped fields are kept in `custom`. Leads with neither a valid Indian mobile nor an email are dropped during processing.
+Field mapping is per source (`import_sources.field_map`, e.g. `{"phone_number":"phone","city":"custom.city"}`); unmapped fields are kept in `custom`. A second phone-like field (`mobile_2`, `alternate_phone`, or just a second phone column) becomes the contact's Mobile 2 (`"…":"altPhone"` in a field map); an inbound call from a Mobile 2 merges into that contact's lead. Leads with neither a valid Indian mobile nor an email are dropped during processing.
 
 | HTTP | Code | When |
 | --- | --- | --- |
@@ -135,13 +136,13 @@ Click-to-call (outbound request we send): `GET https://app.callerdesk.io/api/cli
 
 ### 3.4 `POST /api/jobs/{job}` — internal (QStash)
 
-Not for external use. Jobs: `process-webhook`, `assign-lead`, `deliver-webhook`, `relay-outbox`, `sweep-unassigned`, `sweep-stuck-calls`, `purge-expired`, `recount-open-leads`, `copy-recording`, `callback-reminders`. Returns `200 {ok:true}`; `500` makes QStash retry; `401` on a bad signature.
+Not for external use. Jobs: `process-webhook`, `assign-lead`, `deliver-webhook`, `relay-outbox`, `sweep-unassigned`, `sweep-stuck-calls`, `purge-expired`, `recount-open-leads`, `copy-recording`, `callback-reminders`, `sync-calls`, `tick`. Returns `200 {ok:true}`; `500` makes QStash retry; `401` on a bad signature.
 
 ### 3.5 `GET /api/cron/{job}` — internal (Vercel Cron)
 
 Fans out the matching job to QStash. Allowed: `relay-outbox`, `sweep-unassigned`, `sweep-stuck-calls`, `purge-expired`, `recount-open-leads`. Schedules are in `vercel.json` (daily while the team is on the Hobby plan; see TASK.md T3.15).
 
-Frequent jobs run on **QStash schedules** instead (created by `npm run setup:schedules`, ids `am2pm-*`), which call `/api/jobs/{job}` directly with a signature: `callback-reminders` every 5 min; `sweep-unassigned`, `relay-outbox`, `sweep-stuck-calls` every 15 min.
+Frequent jobs run on **one QStash schedule**, `tick` every 5 min (created by `npm run setup:schedules`, id `am2pm-tick`), which calls `/api/jobs/tick` with a signature. Each tick runs `callback-reminders`; the ticks at :00/:15/:30/:45 also run `relay-outbox`, `sweep-stuck-calls`, `sweep-unassigned` (assigns inline — no message per lead), re-queue of webhooks stuck in `received`, and `sync-calls`. Budget: 288 messages/day of QStash's free 1,000; the per-job schedules were retired on 2026-10-04 after they plus per-lead messages exhausted the daily quota.
 
 ### 3.7 `GET /api/v1/leads` — list, filter and quick search
 
@@ -149,7 +150,7 @@ Session cookie or API key (`read`). Returns leads in the caller's scope (agent: 
 
 | Query | Meaning |
 | --- | --- |
-| `q` | Name / email (2+ letters), phone digits (3+), or a full number (exact, indexed) |
+| `q` | Name / email (2+ letters), phone digits (3+), or a full number (exact, indexed) — matches Mobile 1 or Mobile 2 |
 | `status` | `open` (default) · `won` · `lost` · `dnc` · `all` · `deleted` (Recycle bin — roles with leads **D** only) |
 | `stage`, `source`, `process` | comma-separated values (source = kind, e.g. `meta_ads,web_form`; process = ids) |
 | `owner` | comma-separated user ids; `none` = unassigned |
@@ -165,7 +166,7 @@ Session cookie or API key (`read`). Returns leads in the caller's scope (agent: 
 | `cursor` | `nextCursor` from the previous page (keyset on sort value + id; never OFFSET) |
 | `before` | `prevCursor` — the page before (keyset walked backwards, then flipped) |
 
-`200 {items: LeadRow[], nextCursor: string | null, prevCursor: string | null, total: number}` · `400 invalid_query` · `401` · `403`.
+`200 {items: LeadRow[], nextCursor: string | null, prevCursor: string | null, total: number}` (each row has `phone` and `altPhone`, masked per role) · `400 invalid_query` · `401` · `403`.
 
 ### 3.8 `GET /api/v1/leads/export` — CSV
 
@@ -175,7 +176,7 @@ Session cookie or API key (`read`). Same query params (no `cursor`). Needs the l
 
 Session cookie or API key (`read`) + `interactions` V, and the call must be in the viewer's scope (agents: their own calls; supervisors/managers/coordinators/clients: their processes; admins: workspace). Streams our private Blob copy (`recordings/<tenant>/<yyyy>/<mm>/<id>.<ext>`); until the copy exists, proxies CallerDesk's file (https on `*.callerdesk.io` only) with `Range` passthrough. The provider URL never reaches the browser. `cache-control: private, no-store`. Starting playback is audited (`recording.played`). `404` when there's no recording or the call isn't yours.
 
-Calls log data (Calls screen) and "Sync now" are server-side (lib/calls/list.ts, lib/telephony/sync.ts). The `sync-calls` job (QStash, every 15 min) pulls CallerDesk's Call Report API (`POST https://app.callerdesk.io/api/call_list_v2`, form: `authcode`, `start_date`, `end_date`, `current_page`, `per_page`) and runs each row through the same parser as webhooks — calls whose webhooks were missed still get their result, durations and recording.
+Calls log data (Calls screen) and "Sync now" are server-side (lib/calls/list.ts, lib/telephony/sync.ts). The `sync-calls` job (inside `tick`, every 15 min) pulls CallerDesk's Call Report API (`POST https://app.callerdesk.io/api/call_list_v2`, form: `authcode`, `start_date`, `end_date`, `current_page`, `per_page`) and runs each row through the same parser as webhooks — calls whose webhooks were missed still get their result, durations and recording.
 
 Screen-only operations (save outcome, change stage, start a call from the console, Setup CRUD, notifications, saved filters, bulk assign / stage, Create Lead, edit lead, delete to / restore from the Recycle bin, company settings, workspace switching) are Next.js **server actions** behind the same session + RBAC checks; they become public REST endpoints only when an external caller needs them (section 5).
 
@@ -188,17 +189,17 @@ Screen-only operations (save outcome, change stage, start a call from the consol
 `write`. Same path as every source: normalise → dedupe → auto-assign (DESIGN.md §3). With an API key the lead's source is `api`; from a session, `manual`.
 
 ```json
-{ "processId": "uuid", "name": "Asha Rao", "phone": "+91 98765 43210", "email": "asha@example.com",
+{ "processId": "uuid", "name": "Asha Rao", "phone": "+91 98765 43210", "altPhone": "98111 22233 (optional Mobile 2)", "email": "asha@example.com",
   "city": "Pune", "note": "Asked for a callback", "campaign": "Partner-Oct", "ownerId": "uuid (optional; supervisors/admins)",
   "custom": { "budget": "5L", "site_visit": true } }
 ```
 
-Needs a valid 10-digit mobile or an email. **201** `{"outcome":"created","leadId":"…"}` · **200** `{"outcome":"merged","leadId":"…"}` (an open lead with the same number/email already existed — no duplicate) · `400 invalid_input` · `403 read_only_key` / `forbidden` · `404` unknown process.
+Needs a valid 10-digit mobile or an email. `altPhone`, when given, must be a different valid mobile (`400` otherwise). **201** `{"outcome":"created","leadId":"…"}` · **200** `{"outcome":"merged","leadId":"…"}` (an open lead with the same number/email already existed — no duplicate) · `400 invalid_input` · `403 read_only_key` / `forbidden` · `404` unknown process.
 
 ### 3.12 `GET /api/v1/leads/{id}` · `PATCH /api/v1/leads/{id}` · `DELETE /api/v1/leads/{id}` · `POST /api/v1/leads/{id}/restore`
 
-- **GET** (`read`): full lead — contact (phone masked per role), status, stage, stages, process, source, campaign, attempts, owner, DNC, next callback, `custom`, `outcomes` (ids for §3.13), `timeline` (events + calls with `callId`, `hasRecording`). `404` if not in your scope.
-- **PATCH** (`write`): partial update — any of `name`, `phone` (only roles that see full numbers), `email`, `campaign`, `stage`, `ownerId` (supervisors/admins), `custom` (merged; `""` removes a key). Returns the updated lead. `409` if the new number/email belongs to another open lead in the process.
+- **GET** (`read`): full lead — contact (`phone` and `altPhone` masked per role; `altPhone` null when there is no Mobile 2), status, stage, stages, process, source, campaign, attempts, owner, DNC, next callback, `custom`, `outcomes` (ids for §3.13), `timeline` (events + calls with `callId`, `hasRecording`). `404` if not in your scope.
+- **PATCH** (`write`): partial update — any of `name`, `phone` and `altPhone` (Mobile 2; `""` removes it — only roles that see full numbers), `email`, `campaign`, `stage`, `ownerId` (supervisors/admins), `custom` (merged; `""` removes a key). Returns the updated lead. `409` if the new number/email belongs to another open lead in the process.
 - **DELETE** (`write`, leads **D**: admins): moves to the Recycle bin → `{deleted, skipped}`.
 - **POST …/restore** (`write`, admins): `{restored, skipped}` (skipped when an open lead now holds the same number).
 
@@ -234,6 +235,16 @@ For uptime monitors. Never returns hostnames, errors or values. `replicas` lists
 { "ok": true, "database": { "ok": true, "ms": 5 }, "redis": { "ok": true, "ms": 66 },
   "replicas": [ { "name": "replica-1", "healthy": true } ] }
 ```
+
+### 3.18 `GET /api/time` — public
+
+The server clock, used by the login-page watch to correct a drifting device clock. No auth, never cached, returns nothing else.
+
+**200**
+```json
+{ "now": 1791000000000 }
+```
+`now` is epoch milliseconds (UTC).
 
 ## 4. Outbound webhooks (CRM → your system)
 
@@ -452,6 +463,8 @@ type Lead {
   id: ID!
   name: String!
   phone: String!
+  "Mobile 2, masked like phone; null when the contact has one number."
+  altPhone: String
   email: String
   processId: ID!
   processName: String!
@@ -473,6 +486,8 @@ type LeadDetail {
   id: ID!
   name: String!
   phone: String!
+  "Mobile 2, masked like phone; null when the contact has one number."
+  altPhone: String
   email: String
   status: String!
   stage: String!
@@ -567,6 +582,8 @@ input CreateLeadInput {
   processId: ID!
   name: String!
   phone: String
+  "Optional second mobile number."
+  altPhone: String
   email: String
   city: String
   note: String
@@ -583,6 +600,8 @@ type CreateLeadResult {
 input UpdateLeadInput {
   name: String
   phone: String
+  "Mobile 2; empty string removes it."
+  altPhone: String
   email: String
   campaign: String
   stage: String

@@ -8,7 +8,10 @@
  *   - otherwise: queue + "do I have a live call?" every 20 s, which also
  *     opens the lead of an inbound call answered on the agent's phone
  *     (screen-pop, T1.38a).
- * Keyboard: J/K queue · C call · 1–9 outcome · Enter save.
+ * Keyboard: J/K queue · C call (Shift+C: Mobile 2) · 1–9 outcome · Enter save.
+ * Two numbers (Mobile 2) → one Call button per number. Leads-row call icons
+ * open the console with `dial=primary|alt`, which places that call once on
+ * arrival (the agent clicked Call — this is not auto-dialling, RULE.md §6.1).
  * Queue filter (search · stage · source · tabs) narrows the list, and
  * Prev/Next in the lead header steps through exactly that filtered list.
  * Details are edited in place (components/console/lead-details.tsx).
@@ -25,6 +28,7 @@ import { SlaRing } from "@/components/console/sla-ring";
 import { ErrorNote } from "@/components/ui/form";
 import { Kbd, StageTag, Tag } from "@/components/ui/primitives";
 import type { LeadDetail, QueueItem } from "@/lib/agent/queue";
+import { Portal } from "@/components/ui/portal";
 
 const SOURCE: Record<string, string> = {
   meta_ads: "Meta Ads", web_form: "Website", indiamart: "IndiaMART", justdial: "Justdial", inbound_call: "Inbound call",
@@ -88,6 +92,7 @@ export function LiveConsole({
   showOwners,
   canEdit,
   canReassign,
+  dial,
 }: {
   initialQueue: QueueItem[];
   initialLead: LeadDetail | null;
@@ -97,6 +102,8 @@ export function LiveConsole({
   showOwners: boolean;
   canEdit: boolean;
   canReassign: boolean;
+  /** From a Leads-row call icon: call this number of `initialLead` once. */
+  dial?: "primary" | "alt";
 }) {
   const [queue, setQueue] = useState(initialQueue);
   const [filter, setFilter] = useState<"all" | "due" | "new">("all");
@@ -110,6 +117,7 @@ export function LiveConsole({
   const [lead, setLead] = useState<LeadDetail | null>(initialLead);
   const [phase, setPhase] = useState<Phase>("idle");
   const [callId, setCallId] = useState<string | null>(null);
+  const [dialled, setDialled] = useState<"primary" | "alt">("primary");
   const [talk, setTalk] = useState(0);
   const [endReason, setEndReason] = useState<string | null>(null);
   const [noCall, setNoCall] = useState(false);
@@ -237,17 +245,32 @@ export function LiveConsole({
     return () => clearInterval(t);
   }, [phase]);
 
-  function call() {
-    if (!lead || phase !== "idle" || lead.dnc) return;
+  function call(number: "primary" | "alt" = "primary") {
+    if (!lead || phase !== "idle" || lead.dnc || lead.status !== "open") return;
+    if (number === "alt" && !lead.altPhone) return;
     setError(null);
+    setDialled(number);
     startTransition(async () => {
-      const r = await startCallAction(lead.id);
+      const r = await startCallAction(lead.id, number);
       if (r.ok) {
         setCallId(r.data.interactionId);
         setPhase("agent_ringing");
       } else setError(r.error);
     });
   }
+
+  // Arrived from a Leads-row call icon: place that call once, then drop `dial`
+  // from the URL so a refresh doesn't ring again.
+  const dialDone = useRef(false);
+  useEffect(() => {
+    if (dialDone.current || !dial) return;
+    dialDone.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("dial");
+    window.history.replaceState(null, "", url);
+    call(dial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on arrival
+  }, []);
 
   const outcome = lead?.outcomes.find((o) => o.id === picked) ?? null;
   const canRecord = !!lead && lead.status === "open" && (phase === "ended" || noCall) && !saved;
@@ -273,7 +296,7 @@ export function LiveConsole({
       const i = visible.findIndex((l) => l.id === lead?.id);
       if (e.key === "j" && i < visible.length - 1) open(visible[i + 1]!.id);
       if (e.key === "k" && i > 0) open(visible[i - 1]!.id);
-      if (e.key.toLowerCase() === "c") call();
+      if (e.key.toLowerCase() === "c") call(e.shiftKey ? "alt" : "primary");
       if (canRecord && /^[1-9]$/.test(e.key)) {
         const o = lead?.outcomes[Number(e.key) - 1];
         if (o) setPicked(o.id);
@@ -411,6 +434,12 @@ export function LiveConsole({
                   <h2 className="text-[30px] font-semibold leading-none tracking-[-0.02em]">{lead.name}</h2>
                   <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-2">
                     <span className="font-mono text-[18px] font-medium tracking-tight text-ink tnum">{lead.phone}</span>
+                    {lead.altPhone && (
+                      <span className="inline-flex items-baseline gap-1.5">
+                        <span className="text-[11px] text-ink-4">Mobile 2</span>
+                        <span className="font-mono text-[15px] font-medium tracking-tight text-ink-2 tnum">{lead.altPhone}</span>
+                      </span>
+                    )}
                     {lead.email && <span className="inline-flex items-center gap-1"><AtSign size={13} className="text-ink-4" />{lead.email}</span>}
                   </div>
                 </div>
@@ -484,15 +513,30 @@ export function LiveConsole({
             <div className="panel overflow-hidden">
               <div className="flex items-center gap-4 p-4">
                 {phase === "idle" ? (
-                  <button
-                    onClick={call}
-                    disabled={lead.dnc || lead.status !== "open" || busy}
-                    className="group inline-flex h-12 items-center gap-3 rounded-md bg-ink pl-4 pr-3 text-sheet transition hover:bg-ink-2 disabled:cursor-not-allowed disabled:bg-ink-4"
-                  >
-                    <Phone size={18} className="text-teal" />
-                    <span className="text-[15px] font-semibold">{lead.dnc ? "Do not call" : "Call"}</span>
-                    {!lead.dnc && <span className="ml-1 rounded-[3px] bg-white/10 px-1.5 py-0.5 font-mono text-[10.5px] text-ink-4">C</span>}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => call("primary")}
+                      disabled={lead.dnc || lead.status !== "open" || busy}
+                      title={lead.altPhone ? `Call ${lead.phone}` : undefined}
+                      className="group inline-flex h-12 items-center gap-3 rounded-md bg-ink pl-4 pr-3 text-sheet transition hover:bg-ink-2 disabled:cursor-not-allowed disabled:bg-ink-4"
+                    >
+                      <Phone size={18} className="text-teal" />
+                      <span className="text-[15px] font-semibold">{lead.dnc ? "Do not call" : lead.altPhone ? "Call Mobile 1" : "Call"}</span>
+                      {!lead.dnc && <span className="ml-1 rounded-[3px] bg-white/10 px-1.5 py-0.5 font-mono text-[10.5px] text-ink-4">C</span>}
+                    </button>
+                    {lead.altPhone && !lead.dnc && (
+                      <button
+                        onClick={() => call("alt")}
+                        disabled={lead.status !== "open" || busy}
+                        title={`Call ${lead.altPhone}`}
+                        className="inline-flex h-12 items-center gap-3 rounded-md border border-ink bg-sheet pl-4 pr-3 text-ink transition hover:bg-paper disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Phone size={18} className="text-teal-ink" />
+                        <span className="text-[15px] font-semibold">Call Mobile 2</span>
+                        <span className="ml-1 rounded-[3px] bg-ink/5 px-1.5 py-0.5 font-mono text-[10.5px] text-ink-3">⇧C</span>
+                      </button>
+                    )}
+                  </div>
                 ) : phase === "connected" ? (
                   <div className="flex h-12 items-center gap-3 rounded-md bg-teal-wash px-4 text-teal-ink">
                     <span className="live-dot h-2.5 w-2.5 rounded-full bg-teal text-teal" />
@@ -506,7 +550,7 @@ export function LiveConsole({
                 ) : (
                   <div className="flex h-12 items-center gap-3 rounded-md bg-ember-wash px-4 text-ember-ink">
                     {phase === "agent_ringing" ? <Smartphone size={18} /> : <PhoneIncoming size={18} />}
-                    <span className="text-[14px] font-semibold">{phase === "agent_ringing" ? "Pick up your phone…" : "Ringing the customer…"}</span>
+                    <span className="text-[14px] font-semibold">{phase === "agent_ringing" ? "Pick up your phone…" : lead.altPhone ? `Ringing ${dialled === "alt" ? "Mobile 2" : "Mobile 1"}…` : "Ringing the customer…"}</span>
                   </div>
                 )}
                 <div className="ml-auto text-right text-[11.5px] leading-tight text-ink-3">
@@ -611,6 +655,7 @@ export function LiveConsole({
 
       {/* Filter pop-up: edit a draft, Apply sends it and closes (console has little room for a rail). */}
       {draft && (
+        <Portal>
         <div className="fixed inset-0 z-50 bg-ink/25" onMouseDown={(e) => e.target === e.currentTarget && setDraft(null)}>
           <div role="dialog" aria-label="Filter the queue" className="absolute top-3 bottom-3 left-[84px] flex w-[320px] max-w-[calc(100vw-96px)] flex-col overflow-hidden rounded-lg border border-rule bg-sheet shadow-[0_24px_60px_-20px_rgba(21,23,28,0.45)]">
             <div className="flex shrink-0 items-center justify-between border-b border-rule px-4 py-3">
@@ -635,6 +680,7 @@ export function LiveConsole({
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* Timeline — right column on wide screens (xl+); inside the lead column below that */}

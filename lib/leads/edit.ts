@@ -6,7 +6,7 @@
  * every lead of that person), custom fields validated against the
  * process's definitions, then stage and owner through the normal paths
  * (setStage, bulkAssign) so events, capacity and conversions stay right.
- * Only roles that see full numbers may change the phone. If the change moves
+ * Only roles that see full numbers may change the phone or Mobile 2. If the change moves
  * the dedupe value onto another open lead, the update runs in a SAVEPOINT
  * and is refused with 409 — never a caught error inside the outer
  * transaction (RULE.md §2.1).
@@ -40,6 +40,8 @@ export const EditLeadInput = z.object({
   leadId: z.uuid(),
   name: z.string().trim().min(1).max(120).optional(),
   phone: z.string().trim().max(20).optional(),
+  /** Mobile 2; "" clears it. */
+  altPhone: z.string().trim().max(20).optional(),
   email: z.string().trim().max(254).optional(),
   campaign: z.string().trim().max(120).optional(),
   stage: z.string().trim().min(1).max(30).optional(),
@@ -67,6 +69,7 @@ export async function getLeadForEdit(ctx: SessionContext, leadId: string) {
       id: r.lead.id,
       name: r.contact.name ?? "",
       phone: fullPhone ? (r.contact.phoneE164 ?? "") : displayPhone(ctx.actor.role, r.contact.phoneE164),
+      altPhone: fullPhone ? (r.contact.altPhoneE164 ?? "") : r.contact.altPhoneE164 ? displayPhone(ctx.actor.role, r.contact.altPhoneE164) : "",
       canEditPhone: fullPhone,
       email: r.contact.email ?? "",
       campaign: r.lead.source.campaign ?? "",
@@ -90,6 +93,8 @@ export async function updateLead(ctx: SessionContext, raw: z.input<typeof EditLe
   const input = EditLeadInput.parse(raw);
   const mayChangePhone = input.phone !== undefined && canSeeFullPhone(ctx.actor.role);
   const key = mayChangePhone && input.phone ? phoneKey(input.phone) : "";
+  const mayChangeAlt = input.altPhone !== undefined && canSeeFullPhone(ctx.actor.role);
+  const altKey = mayChangeAlt && input.altPhone ? phoneKey(input.altPhone) : "";
   const emailIn = input.email?.toLowerCase();
   if (emailIn && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailIn)) throw badRequest("Enter a valid email");
 
@@ -103,10 +108,20 @@ export async function updateLead(ctx: SessionContext, raw: z.input<typeof EditLe
       .for("update", { of: leads });
     if (!r) throw notFound("Lead not found");
     // Only a CHANGED number is validated/saved (the form re-sends the current one).
-    const phoneChange = mayChangePhone && (key || null) !== r.contact.phoneKey;
-    if (phoneChange && input.phone && !isValidMobile10(key)) throw badRequest("Enter a valid 10-digit mobile number");
+    // Compares the E.164 too, and a typed number with no E.164 always counts as a change
+    // (→ validated and refused), so a half-stored number can't be saved or kept.
+    const numberEdited = (typed: string | undefined, k: string, storedKey: string | null, storedE164: string | null) =>
+      (k || null) !== storedKey || (typed ? toE164(typed) : null) !== storedE164 || (!!typed && !toE164(typed));
+    const phoneChange = mayChangePhone && numberEdited(input.phone, key, r.contact.phoneKey, r.contact.phoneE164);
+    // Valid = a 6–9 mobile AND a storable E.164 (19 pasted digits have a valid "last 10" but no E.164).
+    if (phoneChange && input.phone && (!isValidMobile10(key) || !toE164(input.phone))) throw badRequest("Enter a valid 10-digit mobile number");
     const nextPhone = phoneChange ? (input.phone ? toE164(input.phone) : null) : r.contact.phoneE164;
     const nextKey = phoneChange ? key || null : r.contact.phoneKey;
+    const altChange = mayChangeAlt && numberEdited(input.altPhone, altKey, r.contact.altPhoneKey, r.contact.altPhoneE164);
+    if (altChange && input.altPhone && (!isValidMobile10(altKey) || !toE164(input.altPhone))) throw badRequest("Enter a valid 10-digit mobile number for Mobile 2");
+    const nextAlt = altChange ? (input.altPhone ? toE164(input.altPhone) : null) : r.contact.altPhoneE164;
+    const nextAltKey = altChange ? altKey || null : r.contact.altPhoneKey;
+    if (nextAltKey && nextAltKey === nextKey) throw badRequest("Mobile 2 is the same as the main number");
     const email = emailIn ?? r.contact.email ?? "";
     const name = input.name ?? r.contact.name ?? "";
     if (!nextPhone && !email) throw badRequest("A lead needs a phone number or an email");
@@ -118,12 +133,18 @@ export async function updateLead(ctx: SessionContext, raw: z.input<typeof EditLe
     const { value: custom, errors } = validateCustom(defs, merged);
     if (errors.length) throw badRequest(errors[0]!);
 
-    await tx.update(contacts).set({ name, phoneE164: nextPhone, phoneKey: nextKey, email: email || null }).where(eq(contacts.id, r.contact.id));
+    await tx.update(contacts).set({ name, phoneE164: nextPhone, phoneKey: nextKey, altPhoneE164: nextAlt, altPhoneKey: nextAltKey, email: email || null }).where(eq(contacts.id, r.contact.id));
 
-    // Dedupe value may move with the edit.
-    const nextDedupe = r.dedupeField === "phoneKey" ? nextKey : r.dedupeField === "email" ? email || null : custom[r.dedupeField] != null ? String(custom[r.dedupeField]).trim().toLowerCase() : null;
-    const dedupeKey = nextDedupe ?? (r.lead.dedupeKey.startsWith("nokey:") ? r.lead.dedupeKey : `nokey:${crypto.randomUUID()}`);
-    if (dedupeKey !== r.lead.dedupeKey) await moveDedupeKey(tx, r.lead.id, dedupeKey);
+    // Dedupe key moves only when the deduped value itself was edited. Leads keyed
+    // "nokey:" at intake (e.g. an invalid number) must stay editable — re-keying
+    // them on an unrelated edit (name, Mobile 2) would collide with a twin lead.
+    const dedupeEdited =
+      r.dedupeField === "phoneKey" ? phoneChange : r.dedupeField === "email" ? (r.contact.email ?? "") !== email : String(r.lead.custom[r.dedupeField] ?? "") !== String(custom[r.dedupeField] ?? "");
+    if (dedupeEdited) {
+      const nextDedupe = r.dedupeField === "phoneKey" ? nextKey : r.dedupeField === "email" ? email || null : custom[r.dedupeField] != null ? String(custom[r.dedupeField]).trim().toLowerCase() : null;
+      const dedupeKey = nextDedupe ?? (r.lead.dedupeKey.startsWith("nokey:") ? r.lead.dedupeKey : `nokey:${crypto.randomUUID()}`);
+      if (dedupeKey !== r.lead.dedupeKey) await moveDedupeKey(tx, r.lead.id, dedupeKey);
+    }
     const source = input.campaign === undefined ? r.lead.source : { ...r.lead.source, campaign: input.campaign || undefined };
     await tx.update(leads).set({ custom, source }).where(eq(leads.id, r.lead.id));
 
@@ -131,6 +152,7 @@ export async function updateLead(ctx: SessionContext, raw: z.input<typeof EditLe
       r.contact.name !== name && "name",
       input.campaign !== undefined && (r.lead.source.campaign ?? "") !== input.campaign && "campaign",
       phoneChange && r.contact.phoneE164 !== nextPhone && "phone",
+      altChange && r.contact.altPhoneE164 !== nextAlt && "mobile 2",
       (r.contact.email ?? "") !== email && "email",
       JSON.stringify(r.lead.custom) !== JSON.stringify(custom) && "custom fields",
     ].filter(Boolean) as string[];

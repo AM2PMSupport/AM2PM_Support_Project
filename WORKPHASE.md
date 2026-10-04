@@ -2,7 +2,7 @@
 
 > The owner's plain-language view of the build. **Kept current**: every time a task is finished, started, added or dropped, this file and [TASK.md](TASK.md) are updated in the same change (CLAUDE.md rule). `tests/workphase.test.ts` fails if a task's status here differs from TASK.md.
 >
-> Last updated: **2026-10-03**
+> Last updated: **2026-10-04**
 
 **Legend:** ✅ Done · 🟡 In progress (partly built, note says what's left) · ⬜ To do · ❌ Dropped
 
@@ -243,6 +243,12 @@ Features the owner asked for while building. Each is live unless marked otherwis
 | 2026-10-03 | Process filter on top of Leads and the console (all processes / one / any combination, "only" shortcut); console Filters panel (stage, source, owner, not called, callback due/later, missed call, has outcome) with Clear all; paging in Leads board view | 1 | ✅ Done |
 | 2026-10-03 | One filter for Leads + console (+ REST/GraphQL): 15 system filters, campaign, last outcome, city, attempts range, created / last activity / next callback date ranges, and every custom field by type (text, dropdown, number range, date range, yes/no); console filters in a pop-up with Apply; applied filters shown as removable chips on both screens | 1 | ✅ Done |
 | 2026-10-03 | Responsive console: 3 columns on wide screens, timeline inside the lead column on tablets, queue slide-over on narrow windows; compact top-bar clock | 1 | ✅ Done |
+| 2026-10-03 | Login page: the brand clock is a working watch (hour, minute, second hands, live IST), corrected against the server clock via `GET /api/time` so a wrong PC clock doesn't show | 1 | ✅ Done |
+| 2026-10-03 | Leads columns in your own order: drag (or ↑/↓) in Manage Columns, remembered per person; row Edit button kept | 1 | ✅ Done |
+| 2026-10-03 | Mobile 2: a second number per contact — add/edit in Create, Edit and console Details; call icon per number on each Leads row; "Call Mobile 1 / Call Mobile 2" in the console (Shift+C); found by search; inbound call from Mobile 2 lands on the same lead; imports map a second phone column; REST/GraphQL `altPhone` | 1 | ✅ Done |
+| 2026-10-03 | Fix: editing demo/imported leads stored without a dedupe key no longer fails with "another open lead has this number"; pasted double numbers are refused instead of half-saved | 1 | ✅ Done |
+| 2026-10-04 | Fix: workspace menu and notifications no longer hidden behind page content on any module (pop-ups and drawers render above the page) | 1 | ✅ Done |
+| 2026-10-04 | Fix: background jobs stopped mid-day (QStash daily quota used up) — one 5-minute schedule, inline auto-assign, lost CallerDesk webhooks recovered automatically; clearer "no caller-ID DID" message | 1 | ✅ Done |
 
 ## How this file is kept up to date
 
@@ -257,6 +263,9 @@ Features the owner asked for while building. Each is live unless marked otherwis
 
 | Date | Change |
 | --- | --- |
+| 2026-10-04 | Owner report: bugs in every module — fixed menu layering (all modules) and the QStash quota outage behind stuck calls / unassigned leads / unprocessed webhooks |
+| 2026-10-03 | Owner request: reorder Leads columns; Mobile 2 with click-to-call per number in Leads and console |
+| 2026-10-03 | Owner request: live analog watch on the login page, synced to server time |
 | 2026-10-03 | Owner request: more filters (system, every column, custom fields by type) in Leads and console; console filter pop-up + applied-filter chips |
 | 2026-10-03 | Owner request: process filter (Leads + console), console filters like Leads, paging in board view |
 | 2026-10-03 | Owner request: fixed-frame Leads/Calls, filters on all lists + lead timeline, responsive console (added under "Added during the build") |

@@ -39,19 +39,29 @@ export function dedupeValue(process: Pick<Process, "dedupeField">, lead: Normali
   }
 }
 
-/** Find the contact by phone key or email, else create it. Contacts are shared across processes. */
+/**
+ * Find the contact by phone key (either of its numbers) or email, else
+ * create it. Contacts are shared across processes. A Mobile 2 that arrives
+ * later fills the contact's empty second number (never overwrites one).
+ */
 async function upsertContact(tx: Tx, lead: NormalisedLead): Promise<string> {
   const conds = [
     lead.phoneKey ? eq(contacts.phoneKey, lead.phoneKey) : undefined,
+    lead.phoneKey ? eq(contacts.altPhoneKey, lead.phoneKey) : undefined,
     lead.email ? eq(contacts.email, lead.email) : undefined,
   ].filter((c) => c !== undefined);
   if (conds.length) {
-    const [found] = await tx.select({ id: contacts.id }).from(contacts).where(or(...conds)).limit(1);
-    if (found) return found.id;
+    const [found] = await tx.select({ id: contacts.id, phoneKey: contacts.phoneKey, altPhoneKey: contacts.altPhoneKey }).from(contacts).where(or(...conds)).limit(1);
+    if (found) {
+      if (lead.altPhoneKey && !found.altPhoneKey && lead.altPhoneKey !== found.phoneKey) {
+        await tx.update(contacts).set({ altPhoneE164: lead.altPhoneE164, altPhoneKey: lead.altPhoneKey }).where(eq(contacts.id, found.id));
+      }
+      return found.id;
+    }
   }
   const [created] = await tx
     .insert(contacts)
-    .values({ name: lead.name, phoneE164: lead.phoneE164, phoneKey: lead.phoneKey, email: lead.email })
+    .values({ name: lead.name, phoneE164: lead.phoneE164, phoneKey: lead.phoneKey, altPhoneE164: lead.altPhoneE164, altPhoneKey: lead.altPhoneKey, email: lead.email })
     .returning({ id: contacts.id });
   return created!.id;
 }

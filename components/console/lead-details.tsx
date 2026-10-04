@@ -15,7 +15,7 @@ import type { LeadDetail } from "@/lib/agent/queue";
 
 type Editor = "text" | "email" | "tel" | "date" | "number" | "select";
 interface Row {
-  id: string; // what to send: name | phone | email | campaign | ownerId | stage | custom:<key>
+  id: string; // what to send: name | phone | altPhone | email | campaign | ownerId | stage | custom:<key>
   label: string;
   value: string;
   display?: string;
@@ -60,6 +60,7 @@ export function LeadDetails({ lead, canEdit, canReassign, onSaved, onError }: { 
   const rows: Row[] = [
     { id: "name", label: "Name", value: lead.name, editor: "text", editable: canEdit },
     { id: "phone", label: "Mobile", value: lead.phone, editor: "tel", editable: canEdit && lead.phoneFull, hint: lead.phoneFull ? undefined : "Hidden for your role" },
+    { id: "altPhone", label: "Mobile 2", value: lead.altPhone ?? "", editor: "tel", editable: canEdit && lead.phoneFull, hint: lead.phoneFull ? undefined : "Hidden for your role" },
     { id: "email", label: "Email", value: lead.email ?? "", editor: "email", editable: canEdit },
     { id: "campaign", label: "Campaign", value: lead.campaign ?? "", editor: "text", editable: canEdit },
     {
@@ -164,7 +165,7 @@ export function LeadDetails({ lead, canEdit, canReassign, onSaved, onError }: { 
                     />
                   )
                 ) : shown ? (
-                  <span className={row.id === "phone" ? "font-mono tnum" : ""}>{shown}</span>
+                  <span className={row.id === "phone" || row.id === "altPhone" ? "font-mono tnum" : ""}>{shown}</span>
                 ) : (
                   <span className="text-ink-4">—</span>
                 )}

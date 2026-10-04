@@ -46,7 +46,8 @@ export const queueAction = async (filters: unknown = {}) =>
     return getQueue(ctx, 150, f);
   });
 export const leadAction = async (id: unknown) => run((ctx) => getLeadDetail(ctx, Id.parse(id)));
-export const startCallAction = async (leadId: unknown) => run((ctx) => placeCall(ctx, Id.parse(leadId)));
+export const startCallAction = async (leadId: unknown, number: unknown = "primary") =>
+  run((ctx) => placeCall(ctx, Id.parse(leadId), z.enum(["primary", "alt"]).parse(number)));
 export const callStatusAction = async (interactionId?: unknown) =>
   run((ctx) => getMyLiveCall(ctx, interactionId ? Id.parse(interactionId) : undefined));
 // Save/stage return the refreshed lead so the browser doesn't need a second round trip.

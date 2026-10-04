@@ -6,6 +6,7 @@
  *   "rahul@gm"      → email ILIKE '%rahul@gm%'   contacts_search_email (trigram GIN)
  *   "9811111111"    → phone_key = '9811111111'   contacts_tenant_phone (btree, exact)
  *   "4321", "98111" → phone_key ILIKE '%4321%'   contacts_search_phone (trigram GIN)
+ *   (both also match Mobile 2: alt_phone_key, contacts_tenant_alt_phone / contacts_search_alt_phone)
  *   "Rah", "sharma" → name ILIKE '%rah%'         contacts_search_name  (trigram GIN),
  *                     ranked by similarity()
  *
@@ -13,7 +14,7 @@
  * fallback) because it is a pure read, and inside RLS like everything else.
  * User text is escaped so % and _ are matched literally.
  */
-import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { contacts, leads } from "@/lib/db/schema";
 import { withTenantRead } from "@/lib/db/tenant";
 import { classifyQuery, escapeLike } from "@/lib/leads/search-classify";
@@ -47,9 +48,9 @@ export async function searchContacts(ctx: TenantContext, query: string, limit = 
 
     const found =
       c.kind === "phone_exact"
-        ? await base.where(eq(contacts.phoneKey, c.value)).limit(take)
+        ? await base.where(or(eq(contacts.phoneKey, c.value), eq(contacts.altPhoneKey, c.value))).limit(take)
         : c.kind === "phone_partial"
-          ? await base.where(ilike(contacts.phoneKey, pattern)).orderBy(desc(contacts.updatedAt)).limit(take)
+          ? await base.where(or(ilike(contacts.phoneKey, pattern), ilike(contacts.altPhoneKey, pattern))).orderBy(desc(contacts.updatedAt)).limit(take)
           : c.kind === "email"
             ? await base.where(ilike(contacts.email, pattern)).orderBy(desc(contacts.updatedAt)).limit(take)
             : await base

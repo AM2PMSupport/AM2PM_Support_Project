@@ -17,10 +17,11 @@ import { LeadsBoard } from "@/components/leads/leads-board";
 import { CreateLead } from "@/components/leads/create-lead";
 import { ProcessPicker } from "@/components/ui/process-picker";
 import { AppliedFilters } from "@/components/leads/applied-filters";
-import { DEFAULT_COLUMNS, SORT_LABEL, type ColumnKey } from "@/components/leads/meta";
+import { COLUMNS, DEFAULT_COLUMNS, SORT_LABEL, type ColumnKey } from "@/components/leads/meta";
 import { bulkAssignAction, bulkStageAction, deleteLeadsAction, deleteViewAction, restoreLeadsAction, saveViewAction } from "@/app/(app)/leads/actions";
 import { classifyQuery } from "@/lib/leads/search-classify";
 import type { LeadRow } from "@/lib/leads/list";
+import { Portal } from "@/components/ui/portal";
 
 // ── per-viewer table prefs (localStorage; safe when storage is unavailable) ───
 const PREFS_KEY = "am2pm.leads.table";
@@ -47,7 +48,10 @@ const subscribe = (l: () => void) => (listeners.add(l), () => listeners.delete(l
 function parsePrefs(raw: string): GridPrefs {
   try {
     const p = JSON.parse(raw) as Partial<GridPrefs>;
-    return { columns: Array.isArray(p.columns) ? (p.columns as ColumnKey[]) : DEFAULT_COLUMNS, widths: p.widths ?? {}, wrap: !!p.wrap };
+    // Order matters (the viewer's column order); drop unknown/duplicate keys from older versions.
+    const known = new Set<string>(COLUMNS.map((c) => c.key));
+    const columns = Array.isArray(p.columns) ? [...new Set(p.columns.filter((k): k is ColumnKey => known.has(k)))] : DEFAULT_COLUMNS;
+    return { columns, widths: p.widths ?? {}, wrap: !!p.wrap };
   } catch {
     return { columns: DEFAULT_COLUMNS, widths: {}, wrap: false };
   }
@@ -363,6 +367,7 @@ export function LeadsWorkspace({
       {editing && <EditLead leadId={editing} owners={options.owners} onClose={() => setEditing(null)} onSaved={() => startTransition(() => router.refresh())} />}
 
       {confirm && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30" onMouseDown={(e) => e.target === e.currentTarget && setConfirm(null)}>
           <div role="alertdialog" aria-label="Delete leads" className="w-[400px] rounded-lg border border-rule bg-sheet p-5 shadow-[0_24px_60px_-20px_rgba(21,23,28,0.45)]">
             <h3 className="text-[15px] font-semibold">Delete {confirm.label}?</h3>
@@ -388,6 +393,7 @@ export function LeadsWorkspace({
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       {creating && (

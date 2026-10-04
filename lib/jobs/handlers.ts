@@ -9,7 +9,7 @@ import { assignLead } from "@/lib/assignment/assign";
 import { deliverWebhook } from "@/lib/events/deliver";
 import { processWebhook } from "@/lib/jobs/process-webhook";
 import { contextForTenantId } from "@/lib/platform-admin/tenants";
-import { purgeExpired, recountOpenLeads, relayOutbox, sweepStuckCalls, sweepUnassigned } from "@/lib/platform-admin/sweeps";
+import { purgeExpired, recountOpenLeads, relayOutbox, requeueStuckWebhooks, sweepStuckCalls, sweepUnassigned } from "@/lib/platform-admin/sweeps";
 import { runCallbackReminders } from "@/lib/platform-admin/reminders";
 import { runImportChunk } from "@/lib/imports/run";
 import { copyRecording } from "@/lib/telephony/recordings";
@@ -48,7 +48,7 @@ export const handlers: Handlers = {
   },
 
   "sweep-unassigned": async () => {
-    await sweepUnassigned();
+    log.info("sweep-unassigned", await sweepUnassigned());
   },
 
   "sweep-stuck-calls": async () => {
@@ -68,15 +68,7 @@ export const handlers: Handlers = {
   },
 
   "sync-calls": async () => {
-    for (const t of await tenantsWithTelephony()) {
-      const { ctx } = await contextForTenantId(t);
-      try {
-        const r = await syncCalls(ctx);
-        log.info("sync-calls", { tenant: ctx.tenantSlug, rows: r?.rows ?? 0, failed: r?.failed ?? 0 });
-      } catch (err) {
-        log.error("sync-calls failed", { tenant: ctx.tenantSlug, err }); // next run retries; one tenant can't block the rest
-      }
-    }
+    await syncAllCalls();
   },
 
   "copy-recording": async ({ tenantId, interactionId }) => {
@@ -84,4 +76,39 @@ export const handlers: Handlers = {
     const r = await copyRecording(ctx, interactionId);
     log.info("copy-recording", { tenant: ctx.tenantSlug, result: r });
   },
+
+  // Runs at :00, :05, … The 15-minute work goes with the ticks at :00/:15/:30/:45.
+  // Parts run side by side and fail independently; a failed part is retried by
+  // the next tick, so the tick itself always succeeds (no QStash retry storm).
+  tick: async () => {
+    const quarter = new Date().getUTCMinutes() % 15 < 5;
+    const parts: [string, () => Promise<unknown>][] = [["callback-reminders", runCallbackReminders]];
+    if (quarter) {
+      parts.push(
+        ["relay-outbox", relayOutbox],
+        ["sweep-stuck-calls", sweepStuckCalls],
+        ["sweep-unassigned", () => sweepUnassigned()],
+        ["requeue-webhooks", requeueStuckWebhooks],
+        ["sync-calls", syncAllCalls],
+      );
+    }
+    const results = await Promise.allSettled(parts.map(([, run]) => run()));
+    results.forEach((r, i) => {
+      if (r.status === "rejected") log.error(`tick: ${parts[i]![0]} failed`, { err: r.reason });
+    });
+    log.info("tick", Object.fromEntries(results.map((r, i) => [parts[i]![0], r.status === "fulfilled" ? (r.value ?? "ok") : "failed"])));
+  },
 };
+
+/** Pull every tenant's provider call report; one tenant failing can't block the rest. */
+async function syncAllCalls() {
+  for (const t of await tenantsWithTelephony()) {
+    const { ctx } = await contextForTenantId(t);
+    try {
+      const r = await syncCalls(ctx);
+      log.info("sync-calls", { tenant: ctx.tenantSlug, rows: r?.rows ?? 0, failed: r?.failed ?? 0 });
+    } catch (err) {
+      log.error("sync-calls failed", { tenant: ctx.tenantSlug, err }); // next run retries
+    }
+  }
+}

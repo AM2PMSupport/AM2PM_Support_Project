@@ -23,6 +23,8 @@ export interface LeadRow {
   id: string;
   name: string;
   phone: string;
+  /** Mobile 2 (display form, masked by role); null when there is none. */
+  altPhone: string | null;
   email: string | null;
   processId: string;
   processName: string;
@@ -166,9 +168,9 @@ function searchCondition(q: string | undefined): SQL | undefined {
     case "email":
       return ilike(contacts.email, pattern);
     case "phone_exact":
-      return eq(contacts.phoneKey, c.value);
+      return or(eq(contacts.phoneKey, c.value), eq(contacts.altPhoneKey, c.value));
     case "phone_partial":
-      return ilike(contacts.phoneKey, pattern);
+      return or(ilike(contacts.phoneKey, pattern), ilike(contacts.altPhoneKey, pattern));
     case "name":
       return or(ilike(contacts.name, pattern), ilike(contacts.email, pattern));
   }
@@ -292,6 +294,7 @@ export async function listLeads(
         id: leads.id,
         name: contacts.name,
         phoneE164: contacts.phoneE164,
+        altPhoneE164: contacts.altPhoneE164,
         email: contacts.email,
         processId: leads.processId,
         processName: processes.name,
@@ -334,6 +337,7 @@ export async function listLeads(
       id: r.id,
       name: r.name ?? "Unknown caller",
       phone: displayPhone(ctx.actor.role, r.phoneE164),
+      altPhone: r.altPhoneE164 ? displayPhone(ctx.actor.role, r.altPhoneE164) : null,
       email: r.email,
       processId: r.processId,
       processName: r.processName,

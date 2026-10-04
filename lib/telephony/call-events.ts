@@ -19,8 +19,8 @@
  *      After commit (never inside a transaction): Redis presence + call lock,
  *      publish the outbox, queue "copy-recording".
  */
-import { and, desc, eq, gte, lte, notInArray, sql } from "drizzle-orm";
-import { callbacks, interactions, leads, processes, telephonyDids, users, type Integration, type Interaction } from "@/lib/db/schema";
+import { and, desc, eq, gte, isNotNull, lte, notInArray, sql } from "drizzle-orm";
+import { callbacks, contacts, interactions, leads, processes, telephonyDids, users, type Integration, type Interaction } from "@/lib/db/schema";
 import { withTenant, type Tx } from "@/lib/db/tenant";
 import { localParts } from "@/lib/assignment/eligibility";
 import { publishOutboxSafely, writeOutbox } from "@/lib/events/outbox";
@@ -98,8 +98,16 @@ async function createInboundCall(ctx: TenantContext, integration: Integration, e
   if (!route) throw new Error(`inbound call on unmapped DID ending ${ev.did.slice(-4)}`);
 
   const key = phoneKey(ev.customerNumber);
-  const e164 = toE164(ev.customerNumber) ?? undefined;
-  const { leadId } = await createOrMergeLead(ctx, route.process, { phoneKey: key || undefined, phoneE164: e164, custom: {} }, { kind: "inbound_call" });
+  const e164 = toE164(ev.customerNumber) ?? undefined; // the number that actually rang (kept on the call)
+  let lookup = { phoneKey: key || undefined, phoneE164: e164 };
+  // Caller rang from a contact's Mobile 2 → merge into the lead keyed by their main number.
+  if (key) {
+    const [byAlt] = await withTenant(ctx, (tx) =>
+      tx.select({ phoneKey: contacts.phoneKey, phoneE164: contacts.phoneE164 }).from(contacts).where(and(eq(contacts.altPhoneKey, key), isNotNull(contacts.phoneKey))).limit(1),
+    );
+    if (byAlt?.phoneKey) lookup = { phoneKey: byAlt.phoneKey, phoneE164: byAlt.phoneE164 ?? undefined };
+  }
+  const { leadId } = await createOrMergeLead(ctx, route.process, { ...lookup, custom: {} }, { kind: "inbound_call" });
 
   const correlationId = `in:${integration.provider}:${ev.providerCallId ?? `${key}:${ev.at.getTime()}`}`;
   return withTenant(ctx, async (tx) => {

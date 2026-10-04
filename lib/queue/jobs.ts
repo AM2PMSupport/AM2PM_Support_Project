@@ -15,7 +15,13 @@ export interface JobPayloads {
   "relay-outbox": Record<string, never>;
   /** Deliver one outbox event to one subscription (HMAC-signed POST). */
   "deliver-webhook": { tenantId: string; outboxId: string; subscriptionId: string };
-  /** Retry assignment for leads still unassigned (every 5 min). */
+  /**
+   * The ONE schedule (every 5 min): callback reminders each run; every 15 min
+   * also outbox relay, stuck calls, unassigned leads, stuck webhooks, call sync.
+   * One schedule = 288 messages/day on QStash's free 1,000/day.
+   */
+  tick: Record<string, never>;
+  /** Retry assignment for leads still unassigned (inside `tick`; callable alone). */
   "sweep-unassigned": Record<string, never>;
   /** Mark click-to-calls with no webhook for 10 min as "unknown"; free locks. */
   "sweep-stuck-calls": Record<string, never>;
@@ -48,6 +54,7 @@ export const JOB_NAMES = [
   "callback-reminders",
   "copy-recording",
   "sync-calls",
+  "tick",
 ] as const satisfies readonly JobName[];
 
 export function isJobName(v: string): v is JobName {

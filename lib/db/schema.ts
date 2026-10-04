@@ -276,6 +276,9 @@ export const contacts = pgTable(
     phoneE164: text("phone_e164"),
     /** Last 10 digits — dedupe / lookup key (crmv7 phoneKey). */
     phoneKey: text("phone_key"),
+    /** Second mobile ("Mobile 2"): callable from Leads/console, matched on inbound calls and search. */
+    altPhoneE164: text("alt_phone_e164"),
+    altPhoneKey: text("alt_phone_key"),
     email: text("email"),
     consent: jsonb("consent")
       .$type<Partial<Record<"whatsapp" | "email" | "sms", { optedIn: boolean; at: string; source: string }>>>()
@@ -288,10 +291,12 @@ export const contacts = pgTable(
   (t) => [
     // Exact lookups: inbound caller → contact, dedupe, email match.
     index("contacts_tenant_phone").on(t.tenantId, t.phoneKey),
+    index("contacts_tenant_alt_phone").on(t.tenantId, t.altPhoneKey),
     index("contacts_tenant_email").on(t.tenantId, t.email),
     // Search (ILIKE '%…%'): trigram GIN, tenant-first via btree_gin (drizzle/0002).
     index("contacts_search_name").using("gin", t.tenantId, t.name.op("gin_trgm_ops")),
     index("contacts_search_phone").using("gin", t.tenantId, t.phoneKey.op("gin_trgm_ops")),
+    index("contacts_search_alt_phone").using("gin", t.tenantId, t.altPhoneKey.op("gin_trgm_ops")),
     index("contacts_search_email").using("gin", t.tenantId, t.email.op("gin_trgm_ops")),
   ],
 );

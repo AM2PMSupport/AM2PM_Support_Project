@@ -9,10 +9,14 @@
  *     View Mode (Wrap / Clip text). It sits OUTSIDE the scroll container so
  *     it is never clipped.
  *   - Drag a header's right edge to resize a column (saved per viewer).
+ *   - Column ORDER is the viewer's: drag rows (or use ↑/↓) in Manage Columns;
+ *     `prefs.columns` is both the visible set and the order.
+ *   - Phone cell lists Mobile 1 and Mobile 2, each with its own call icon →
+ *     console opens that lead and places that call (`?dial=primary|alt`).
  */
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronRight, Columns3, Eye, ListOrdered, Pencil, Phone, RotateCcw, SlidersHorizontal, StretchHorizontal, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronRight, Columns3, Eye, GripVertical, ListOrdered, Pencil, Phone, RotateCcw, SlidersHorizontal, StretchHorizontal, Trash2 } from "lucide-react";
 import { StageTag, Tag } from "@/components/ui/primitives";
 import { COLUMNS, SOURCE_LABEL, ago, age, relTime, type ColumnKey } from "@/components/leads/meta";
 import type { LeadRow } from "@/lib/leads/list";
@@ -62,9 +66,19 @@ export function LeadsGrid({
   onRestore: (row: LeadRow) => void;
 }) {
   const [menu, setMenu] = useState<null | "root" | "columns" | "pages" | "view">(null);
+  const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { columns, widths, wrap } = prefs;
   const has = (k: ColumnKey) => columns.includes(k);
+  const LABEL = Object.fromEntries(COLUMNS.map((c) => [c.key, c.label])) as Record<ColumnKey, string>;
+  const shownCols = columns.filter((k) => k in LABEL);
+  // Manage Columns lists the visible ones in their order, then the hidden ones.
+  const menuCols = [...shownCols, ...COLUMNS.map((c) => c.key).filter((k) => !columns.includes(k))];
+  const move = (k: ColumnKey, to: number) => {
+    const next = shownCols.filter((x) => x !== k);
+    next.splice(Math.max(0, Math.min(to, next.length)), 0, k);
+    onPrefs({ ...prefs, columns: next });
+  };
   const w = (k: string) => widths[k] ?? DEFAULT_WIDTH[k] ?? 140;
   const allOn = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const showActions = recycleBin ? can.delete : can.edit || can.delete;
@@ -137,9 +151,7 @@ export function LeadsGrid({
                 Lead name
                 <span onMouseDown={(e) => startResize(e, "name")} title="Drag to resize" className="absolute top-1.5 right-0 bottom-1.5 w-1.5 cursor-col-resize rounded border-r-2 border-transparent group-hover/th:border-rule-strong hover:!border-teal-ink" />
               </th>
-              {COLUMNS.filter((c) => has(c.key)).map((c) => (
-                th(c.key, c.label, c.key === "callback" || c.key === "created" || c.key === "attempts")
-              ))}
+              {shownCols.map((k) => th(k, LABEL[k], k === "callback" || k === "created" || k === "attempts"))}
               {recycleBin && <th className="px-3 py-2.5 font-medium whitespace-nowrap">Deleted</th>}
               {/* Filler: absorbs extra width on wide screens so columns keep their sizes. */}
               <th aria-hidden className="w-full" />
@@ -175,29 +187,57 @@ export function LeadsGrid({
                     {recycleBin ? <span className="font-semibold">{l.name}</span> : <Link href={`/console?lead=${l.id}`} className="font-semibold hover:underline">{l.name}</Link>}
                     {!has("email") && l.email && <div className="truncate text-[11px] text-ink-4">{l.email}</div>}
                   </td>
-                  {has("phone") && (
-                    <td {...cell("phone", bg)}>
-                      <Link href={`/console?lead=${l.id}`} className="inline-flex items-center gap-1.5 font-mono text-[12.5px] tnum hover:text-teal-ink" title="Open to call">
-                        {l.phone} <Phone size={12} className="text-ink-4" />
-                      </Link>
-                    </td>
-                  )}
-                  {has("email") && <td {...cell("email", `text-ink-2 ${bg}`)}>{l.email ?? <span className="text-ink-4">—</span>}</td>}
-                  {has("process") && <td {...cell("process", `text-ink-2 ${bg}`)}>{l.processName}</td>}
-                  {has("source") && <td {...cell("source", bg)}><Tag>{SOURCE_LABEL[l.source] ?? l.source}</Tag></td>}
-                  {has("campaign") && <td {...cell("campaign", `text-ink-2 ${bg}`)}>{l.campaign ?? <span className="text-ink-4">—</span>}</td>}
-                  {has("stage") && <td {...cell("stage", bg)}>{l.status === "open" ? <StageTag stage={l.stage} /> : <Tag tone={l.status === "won" ? "moss" : "ember"}>{l.status === "dnc" ? "DNC" : l.status[0]!.toUpperCase() + l.status.slice(1)}</Tag>}</td>}
-                  {has("owner") && <td {...cell("owner", `text-ink-2 ${bg}`)}>{l.owner ?? <span className="text-ember-ink">Unassigned</span>}</td>}
-                  {has("outcome") && <td {...cell("outcome", `text-ink-2 ${bg}`)}>{l.lastDisposition ?? <span className="text-ink-4">—</span>}</td>}
-                  {has("attempts") && <td {...cell("attempts", `text-right font-mono text-[12px] tnum ${bg}`)}>{l.attempts}</td>}
-                  {has("callback") && (
-                    <td {...cell("callback", `text-right font-mono text-[12px] tnum ${overdue ? "font-semibold text-ember-ink" : "text-ink-2"} ${bg}`)}>
-                      {l.nextCallbackAt ? relTime(l.nextCallbackAt, renderedAt) : <span className="text-ink-4">—</span>}
-                    </td>
-                  )}
-                  {has("activity") && <td {...cell("activity", `text-ink-3 ${bg}`)}>{l.lastActivityAt ? ago(l.lastActivityAt, renderedAt) : <span className="text-ink-4">—</span>}</td>}
-                  {has("city") && <td {...cell("city", `text-ink-2 ${bg}`)}>{l.city ?? <span className="text-ink-4">—</span>}</td>}
-                  {has("created") && <td {...cell("created", `text-right font-mono text-[12px] text-ink-3 tnum ${bg}`)}>{age(l.createdAt, renderedAt)}</td>}
+                  {shownCols.map((k) => {
+                    switch (k) {
+                      case "phone": {
+                        const callable = !recycleBin && l.status === "open";
+                        const num = (n: string, which: "primary" | "alt") =>
+                          callable ? (
+                            <Link key={which} href={`/console?lead=${l.id}&dial=${which}`} className="group/call inline-flex items-center gap-1.5 font-mono text-[12.5px] tnum hover:text-teal-ink" title={`Call ${n}`} aria-label={`Call ${l.name} on ${which === "alt" ? "Mobile 2" : "Mobile 1"}`}>
+                              {n} <Phone size={12} className="text-ink-4 group-hover/call:text-teal-ink" />
+                            </Link>
+                          ) : (
+                            <span key={which} className="font-mono text-[12.5px] tnum">{n}</span>
+                          );
+                        return (
+                          <td key={k} {...cell("phone", bg)}>
+                            <div className="flex flex-col gap-0.5">
+                              {l.phone === "—" ? <span className="text-ink-4">—</span> : num(l.phone, "primary")}
+                              {l.altPhone && num(l.altPhone, "alt")}
+                            </div>
+                          </td>
+                        );
+                      }
+                      case "email":
+                        return <td key={k} {...cell("email", `text-ink-2 ${bg}`)}>{l.email ?? <span className="text-ink-4">—</span>}</td>;
+                      case "process":
+                        return <td key={k} {...cell("process", `text-ink-2 ${bg}`)}>{l.processName}</td>;
+                      case "source":
+                        return <td key={k} {...cell("source", bg)}><Tag>{SOURCE_LABEL[l.source] ?? l.source}</Tag></td>;
+                      case "campaign":
+                        return <td key={k} {...cell("campaign", `text-ink-2 ${bg}`)}>{l.campaign ?? <span className="text-ink-4">—</span>}</td>;
+                      case "stage":
+                        return <td key={k} {...cell("stage", bg)}>{l.status === "open" ? <StageTag stage={l.stage} /> : <Tag tone={l.status === "won" ? "moss" : "ember"}>{l.status === "dnc" ? "DNC" : l.status[0]!.toUpperCase() + l.status.slice(1)}</Tag>}</td>;
+                      case "owner":
+                        return <td key={k} {...cell("owner", `text-ink-2 ${bg}`)}>{l.owner ?? <span className="text-ember-ink">Unassigned</span>}</td>;
+                      case "outcome":
+                        return <td key={k} {...cell("outcome", `text-ink-2 ${bg}`)}>{l.lastDisposition ?? <span className="text-ink-4">—</span>}</td>;
+                      case "attempts":
+                        return <td key={k} {...cell("attempts", `text-right font-mono text-[12px] tnum ${bg}`)}>{l.attempts}</td>;
+                      case "callback":
+                        return (
+                          <td key={k} {...cell("callback", `text-right font-mono text-[12px] tnum ${overdue ? "font-semibold text-ember-ink" : "text-ink-2"} ${bg}`)}>
+                            {l.nextCallbackAt ? relTime(l.nextCallbackAt, renderedAt) : <span className="text-ink-4">—</span>}
+                          </td>
+                        );
+                      case "activity":
+                        return <td key={k} {...cell("activity", `text-ink-3 ${bg}`)}>{l.lastActivityAt ? ago(l.lastActivityAt, renderedAt) : <span className="text-ink-4">—</span>}</td>;
+                      case "city":
+                        return <td key={k} {...cell("city", `text-ink-2 ${bg}`)}>{l.city ?? <span className="text-ink-4">—</span>}</td>;
+                      case "created":
+                        return <td key={k} {...cell("created", `text-right font-mono text-[12px] text-ink-3 tnum ${bg}`)}>{age(l.createdAt, renderedAt)}</td>;
+                    }
+                  })}
                   {recycleBin && <td className={`px-3 py-2.5 whitespace-nowrap text-ink-3 ${bg}`}>{l.deletedAt ? ago(l.deletedAt, renderedAt) : "—"}</td>}
                   <td aria-hidden className={bg} />
                   <td className={`sticky right-0 z-[1] pr-3 text-right whitespace-nowrap shadow-[-1px_0_0_var(--color-rule)] ${bg}`}>
@@ -240,25 +280,58 @@ export function LeadsGrid({
       {menu && (
         <div ref={menuRef} className="absolute top-11 right-2 z-30 flex items-start gap-1.5">
           {menu !== "root" && (
-            <div className="w-[230px] rounded-md border border-rule bg-sheet p-1.5 shadow-[0_14px_40px_-12px_rgba(21,23,28,0.3)]">
+            <div className="w-[250px] rounded-md border border-rule bg-sheet p-1.5 shadow-[0_14px_40px_-12px_rgba(21,23,28,0.3)]">
               {menu === "columns" && (
                 <>
-                  <div className="eyebrow px-2 pt-1 pb-1.5">Manage columns</div>
-                  <div className="max-h-[320px] overflow-y-auto">
-                    {COLUMNS.map((c) => (
-                      <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] hover:bg-paper">
-                        <input
-                          type="checkbox"
-                          checked={has(c.key)}
-                          onChange={(e) => onPrefs({ ...prefs, columns: e.target.checked ? COLUMNS.map((x) => x.key).filter((k) => k === c.key || columns.includes(k)) : columns.filter((k) => k !== c.key) })}
-                          className="h-3.5 w-3.5 accent-[var(--color-ink)]"
-                        />
-                        {c.label}
-                      </label>
-                    ))}
+                  <div className="eyebrow px-2 pt-1">Manage columns</div>
+                  <p className="px-2 pb-1.5 text-[11px] text-ink-4">Drag or use the arrows to change the order.</p>
+                  <div className="max-h-[340px] overflow-y-auto">
+                    {menuCols.map((k) => {
+                      const on = has(k);
+                      const i = shownCols.indexOf(k);
+                      return (
+                        <div
+                          key={k}
+                          draggable={on}
+                          onDragStart={(e) => {
+                            setDragKey(k);
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragOver={(e) => {
+                            if (!dragKey || !on || dragKey === k) return;
+                            e.preventDefault();
+                            move(dragKey, i);
+                          }}
+                          onDragEnd={() => setDragKey(null)}
+                          data-col-item={k}
+                          className={`group/item flex items-center gap-1.5 rounded px-1 py-1 text-[12.5px] hover:bg-paper ${dragKey === k ? "bg-teal/15" : ""}`}
+                        >
+                          <GripVertical size={13} className={on ? "cursor-grab text-ink-4 active:cursor-grabbing" : "invisible"} aria-hidden />
+                          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={(e) => onPrefs({ ...prefs, columns: e.target.checked ? [...shownCols, k] : shownCols.filter((x) => x !== k) })}
+                              className="h-3.5 w-3.5 accent-[var(--color-ink)]"
+                            />
+                            <span className="truncate">{LABEL[k]}</span>
+                          </label>
+                          {on && (
+                            <span className="flex opacity-0 group-hover/item:opacity-100 focus-within:opacity-100">
+                              <button onClick={() => move(k, i - 1)} disabled={i === 0} aria-label={`Move ${LABEL[k]} left`} title="Move left" className="rounded p-0.5 text-ink-3 hover:bg-sheet hover:text-ink disabled:opacity-30">
+                                <ArrowUp size={12} />
+                              </button>
+                              <button onClick={() => move(k, i + 1)} disabled={i === shownCols.length - 1} aria-label={`Move ${LABEL[k]} right`} title="Move right" className="rounded p-0.5 text-ink-3 hover:bg-sheet hover:text-ink disabled:opacity-30">
+                                <ArrowDown size={12} />
+                              </button>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <button onClick={() => onPrefs({ ...prefs, columns: COLUMNS.filter((c) => c.default).map((c) => c.key) })} className="mt-1 w-full rounded px-2 py-1.5 text-left text-[12px] text-ink-3 hover:bg-paper hover:text-ink">
-                    Default columns
+                    Default columns &amp; order
                   </button>
                 </>
               )}

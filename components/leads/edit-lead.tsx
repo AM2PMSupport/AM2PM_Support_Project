@@ -11,11 +11,12 @@ import { X } from "lucide-react";
 import { leadForEditAction, updateLeadAction } from "@/app/(app)/leads/actions";
 import { ErrorNote, Field, Input, Select } from "@/components/ui/form";
 import type { LeadForEdit } from "@/lib/leads/edit";
+import { Portal } from "@/components/ui/portal";
 
 export function EditLead({ leadId, owners, onClose, onSaved }: { leadId: string; owners: { id: string; name: string }[]; onClose: () => void; onSaved: () => void }) {
   const [lead, setLead] = useState<LeadForEdit | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [form, setForm] = useState<{ name: string; phone: string; email: string; campaign: string; stage: string; ownerId: string; custom: Record<string, string> } | null>(null);
+  const [form, setForm] = useState<{ name: string; phone: string; altPhone: string; email: string; campaign: string; stage: string; ownerId: string; custom: Record<string, string> } | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, startTransition] = useTransition();
@@ -26,7 +27,7 @@ export function EditLead({ leadId, owners, onClose, onSaved }: { leadId: string;
       if (!live) return;
       if (!r.ok || !r.data) return setLoadError(r.ok ? "Lead not found" : r.error);
       setLead(r.data);
-      setForm({ name: r.data.name, phone: r.data.phone, email: r.data.email, campaign: r.data.campaign, stage: r.data.stage, ownerId: r.data.ownerId ?? "", custom: { ...r.data.custom } });
+      setForm({ name: r.data.name, phone: r.data.phone, altPhone: r.data.altPhone, email: r.data.email, campaign: r.data.campaign, stage: r.data.stage, ownerId: r.data.ownerId ?? "", custom: { ...r.data.custom } });
     });
     return () => {
       live = false;
@@ -44,6 +45,7 @@ export function EditLead({ leadId, owners, onClose, onSaved }: { leadId: string;
         leadId: lead.id,
         name: form.name,
         phone: lead.canEditPhone ? form.phone : undefined,
+        altPhone: lead.canEditPhone ? form.altPhone : undefined,
         email: form.email,
         campaign: form.campaign,
         stage: form.stage,
@@ -58,7 +60,8 @@ export function EditLead({ leadId, owners, onClose, onSaved }: { leadId: string;
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-ink/25" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <Portal>
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink/25" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-label="Edit lead" className="flex h-full w-[460px] flex-col bg-sheet shadow-[-20px_0_60px_-20px_rgba(21,23,28,0.35)]">
         <header className="flex items-center justify-between border-b border-rule px-5 py-4">
           <div className="min-w-0">
@@ -76,6 +79,9 @@ export function EditLead({ leadId, owners, onClose, onSaved }: { leadId: string;
             <Field label="Name"><Input value={form.name} onChange={(e) => set({ name: e.target.value })} required maxLength={120} autoFocus /></Field>
             <Field label="Mobile" hint={lead.canEditPhone ? "10-digit Indian mobile; +91 optional" : "Hidden for your role — ask a manager to change it"}>
               <Input value={form.phone} onChange={(e) => set({ phone: e.target.value })} disabled={!lead.canEditPhone} inputMode="tel" maxLength={20} />
+            </Field>
+            <Field label="Mobile 2" hint={lead.canEditPhone ? "Optional second number — leave empty to remove" : undefined}>
+              <Input value={form.altPhone} onChange={(e) => set({ altPhone: e.target.value })} disabled={!lead.canEditPhone} inputMode="tel" maxLength={20} placeholder="—" />
             </Field>
             <Field label="Email"><Input type="email" value={form.email} onChange={(e) => set({ email: e.target.value })} maxLength={254} /></Field>
             <Field label="Campaign" hint={`Source: ${lead.source.replace(/_/g, " ")}`}><Input value={form.campaign} onChange={(e) => set({ campaign: e.target.value })} maxLength={120} /></Field>
@@ -150,5 +156,6 @@ export function EditLead({ leadId, owners, onClose, onSaved }: { leadId: string;
         )}
       </div>
     </div>
+    </Portal>
   );
 }

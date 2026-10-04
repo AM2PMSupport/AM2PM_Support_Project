@@ -17,3 +17,6 @@ PASSWORD.md
 
 # graphify knowledge graph (local; regenerate with `graphify update .`)
 graphify-out/
+
+# Dev server / local logs (may contain numbers from search URLs)
+*.log

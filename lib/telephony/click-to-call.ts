@@ -11,6 +11,9 @@
  *   5. On provider error: mark the call failed, release the lock, return a
  *      message the agent can act on.
  *
+ * `number` picks the contact's main number or Mobile 2 ("alt"); the dialled
+ * number is stored on the interaction, so the call log shows which one rang.
+ *
  * Everything after step 4 (ringing, answered, completed, recording) arrives
  * by webhook and is handled in call-events.ts. No voice ever passes through
  * the CRM, and there is no SIP (RULE.md §6.1.1).
@@ -30,7 +33,9 @@ export interface PlaceCallResult {
   status: "initiated";
 }
 
-export async function placeCall(ctx: SessionContext, leadId: string): Promise<PlaceCallResult> {
+export type CallNumber = "primary" | "alt";
+
+export async function placeCall(ctx: SessionContext, leadId: string, number: CallNumber = "primary"): Promise<PlaceCallResult> {
   const userId = ctx.actor.userId;
 
   // Step 1: load and validate everything in one short transaction.
@@ -47,7 +52,8 @@ export async function placeCall(ctx: SessionContext, leadId: string): Promise<Pl
     // TODO(T1.14): full scope resolver (team/process scopes for supervisors).
     if (ctx.actor.role === "agent" && lead.assignedTo !== userId) throw forbidden("This lead is not assigned to you");
     if (contact.dnc || lead.status === "dnc") throw forbidden("This contact is on Do Not Call", "dnc");
-    if (!contact.phoneE164) throw new ApiError(422, "no_phone", "This contact has no phone number");
+    const customerNumber = number === "alt" ? contact.altPhoneE164 : contact.phoneE164;
+    if (!customerNumber) throw new ApiError(422, "no_phone", number === "alt" ? "This contact has no second number" : "This contact has no phone number");
 
     const [agent] = await tx.select().from(users).where(eq(users.id, userId));
     if (!agent?.agentPhoneE164 || !agent.agentPhone10) {
@@ -71,9 +77,11 @@ export async function placeCall(ctx: SessionContext, leadId: string): Promise<Pl
       .orderBy(desc(telephonyDids.defaultForOutbound))
       .limit(1);
     const callerId = agent.did ?? did?.number;
-    if (!callerId) throw new ApiError(422, "no_did", "No caller-ID number (DID) is set for this process.");
+    if (!callerId) {
+      throw new ApiError(422, "no_did", `No caller-ID number (DID) is set for "${process.name}". An admin can add one in Setup → Telephony (or give you your own DID in Setup → Team).`);
+    }
 
-    return { lead, contact, process, agent, integration, callerId };
+    return { lead, contact, process, agent, integration, callerId, customerNumber };
   });
 
   const adapter = telephonyAdapter(plan.integration.provider)!;
@@ -103,7 +111,7 @@ export async function placeCall(ctx: SessionContext, leadId: string): Promise<Pl
           correlationId,
           did: plan.callerId,
           agentNumber: plan.agent.agentPhone10,
-          customerNumber: plan.contact.phoneE164,
+          customerNumber: plan.customerNumber,
         })
         .returning({ id: interactions.id });
       return row!.id;
@@ -116,7 +124,7 @@ export async function placeCall(ctx: SessionContext, leadId: string): Promise<Pl
   // Step 4: ask the provider to ring the agent, then the customer.
   const creds = JSON.parse(decrypt(plan.integration.credentialsEnc)) as Record<string, string>;
   const result = await adapter.clickToCall(
-    { agentNumber: plan.agent.agentPhoneE164!, customerNumber: plan.contact.phoneE164!, callerId: plan.callerId, correlationId },
+    { agentNumber: plan.agent.agentPhoneE164!, customerNumber: plan.customerNumber, callerId: plan.callerId, correlationId },
     creds,
   );
 

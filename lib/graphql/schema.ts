@@ -123,6 +123,8 @@ type Lead {
   id: ID!
   name: String!
   phone: String!
+  "Mobile 2, masked like phone; null when the contact has one number."
+  altPhone: String
   email: String
   processId: ID!
   processName: String!
@@ -144,6 +146,8 @@ type LeadDetail {
   id: ID!
   name: String!
   phone: String!
+  "Mobile 2, masked like phone; null when the contact has one number."
+  altPhone: String
   email: String
   status: String!
   stage: String!
@@ -238,6 +242,8 @@ input CreateLeadInput {
   processId: ID!
   name: String!
   phone: String
+  "Optional second mobile number."
+  altPhone: String
   email: String
   city: String
   note: String
@@ -254,6 +260,8 @@ type CreateLeadResult {
 input UpdateLeadInput {
   name: String
   phone: String
+  "Mobile 2; empty string removes it."
+  altPhone: String
   email: String
   campaign: String
   stage: String

@@ -239,6 +239,8 @@ async function detailIn(tx: Tx, ctx: SessionContext, leadId: string) {
     id: lead.id,
     name: contact.name ?? "Unknown caller",
     phone: displayPhone(ctx.actor.role, contact.phoneE164),
+    /** Mobile 2, display form (masked by role); null when the contact has one number. */
+    altPhone: contact.altPhoneE164 ? displayPhone(ctx.actor.role, contact.altPhoneE164) : null,
     /** True when `phone` is the full number (role may see and edit it). */
     phoneFull: canSeeFullPhone(ctx.actor.role),
     email: contact.email,

@@ -26,3 +26,20 @@ describe("header guessing via normaliseLead", () => {
     expect(r).toMatchObject({ ok: true, lead: { name: "Asha", phoneKey: "9876543210", email: "a@x.in", custom: { Budget: "5L" } } });
   });
 });
+
+describe("Mobile 2 from imports", () => {
+  it("maps an explicit second-number header", () => {
+    const r = normaliseLead({ Name: "Asha", Mobile: "9876543210", "Alternate Mobile": "9123456789" });
+    expect(r.ok && r.lead).toMatchObject({ phoneKey: "9876543210", altPhoneKey: "9123456789", altPhoneE164: "+919123456789" });
+  });
+  it("treats a second phone-like column as Mobile 2", () => {
+    const r = normaliseLead({ "Contact No": "9876543210", WhatsApp: "9123456789" });
+    expect(r.ok && r.lead).toMatchObject({ phoneKey: "9876543210", altPhoneKey: "9123456789" });
+  });
+  it("drops an invalid or duplicate Mobile 2 without rejecting the lead", () => {
+    const bad = normaliseLead({ Mobile: "9876543210", "Mobile 2": "12345" });
+    expect(bad.ok && bad.lead.altPhoneKey).toBeUndefined();
+    const dup = normaliseLead({ Mobile: "9876543210", "Phone 2": "+91 98765 43210" });
+    expect(dup.ok && dup.lead.altPhoneKey).toBeUndefined();
+  });
+});

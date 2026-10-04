@@ -1,6 +1,6 @@
 /**
- * Sign-in. Left: the brand clock as a large drawn mark with the live IST
- * time. Right: Google and email-OTP sign-in.
+ * Sign-in. Left: the brand clock as a working watch (live IST, hour/minute/
+ * second hands — components/shell/brand-watch.tsx). Right: sign-in form.
  *
  * Email + password sign-in (POST /api/auth/login → HttpOnly session cookie).
  * Already signed in → straight to the console.
@@ -12,36 +12,9 @@ import { ShiftClock } from "@/components/shell/topbar";
 import { getSession } from "@/lib/auth/session";
 import { homeFor } from "@/lib/auth/rbac";
 import { Wordmark } from "@/components/ui/logo";
+import { BrandWatch } from "@/components/shell/brand-watch";
 
 export const metadata: Metadata = { title: "Sign in" };
-
-function BigClock() {
-  // The logo's geometry at poster scale: teal outer arc, orange inner arc, check hand.
-  return (
-    <svg viewBox="0 0 400 400" className="h-auto w-full max-w-[420px]" aria-hidden="true">
-      <circle cx="200" cy="200" r="168" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-      {Array.from({ length: 60 }).map((_, i) => {
-        const a = (i / 60) * Math.PI * 2;
-        const long = i % 5 === 0;
-        const r1 = long ? 184 : 188;
-        return (
-          <line
-            key={i}
-            x1={200 + Math.cos(a) * r1}
-            y1={200 + Math.sin(a) * r1}
-            x2={200 + Math.cos(a) * 194}
-            y2={200 + Math.sin(a) * 194}
-            stroke="rgba(255,255,255,0.18)"
-            strokeWidth={long ? 2 : 1}
-          />
-        );
-      })}
-      <path d="M315 85A160 160 0 1 0 360 200" stroke="#6BD3DC" strokeWidth="34" strokeLinecap="round" fill="none" />
-      <path d="M286 114A120 120 0 0 1 240 313" stroke="#F56332" strokeWidth="18" strokeLinecap="round" fill="none" />
-      <path d="M125 155 190 225 335 80" stroke="#6BD3DC" strokeWidth="32" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-    </svg>
-  );
-}
 
 export default async function LoginPage() {
   const session = await getSession();
@@ -51,7 +24,7 @@ export default async function LoginPage() {
       <section className="relative hidden flex-col justify-between overflow-hidden bg-ink p-10 text-sheet lg:flex">
         <Wordmark dark />
         <div className="flex flex-1 items-center justify-center py-8">
-          <BigClock />
+          <BrandWatch />
         </div>
         <div className="flex items-end justify-between gap-6">
           <p className="max-w-[340px] text-[26px] font-semibold leading-[1.15] tracking-[-0.02em]">

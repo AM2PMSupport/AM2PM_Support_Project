@@ -88,7 +88,7 @@ outbox ··< webhook_deliveries >─ webhook_subscriptions   (event_id: no FK, o
 
 ### 2.2 Leads
 
-**contacts**: name, phone_e164, phone_key (last 10 digits), email (lowercase), consent jsonb { whatsapp, email, sms: { optedIn, at, source } }, dnc, custom jsonb. Indexes (tenant_id, phone_key), (tenant_id, email).
+**contacts**: name, phone_e164, phone_key (last 10 digits), alt_phone_e164 / alt_phone_key ("Mobile 2": a second callable number; contacts match on either number, an inbound call from Mobile 2 merges into the lead keyed by the main number; click-to-call picks `primary` or `alt`), email (lowercase), consent jsonb { whatsapp, email, sms: { optedIn, at, source } }, dnc, custom jsonb. Indexes (tenant_id, phone_key), (tenant_id, alt_phone_key), (tenant_id, email).
 
 **leads** — one enquiry for one process.
 | Column | Notes |
@@ -154,7 +154,7 @@ Every query the app runs has an index built for it. Rules: tenant-scoped indexes
 | Match by provider call id | `interactions_provider_call` (tenant_id, provider, provider_call_id) | unique, partial |
 | Fallback match: agent's latest call to a customer | `interactions_agent_customer` (tenant_id, agent_number, customer_number, started_at) | btree |
 | Caller history / screen-pop by phone | `interactions_customer` (tenant_id, customer_number, started_at) | btree |
-| Inbound caller → contact | `contacts_tenant_phone` (tenant_id, phone_key) | btree |
+| Inbound caller → contact | `contacts_tenant_phone` (tenant_id, phone_key); Mobile 2 via `contacts_tenant_alt_phone` | btree |
 | Inbound DID → process | `dids_tenant_number10` (tenant_id, number_10) | unique |
 | Answering agent by phone | `users_tenant_phone10` (tenant_id, agent_phone_10) | btree |
 | Lead timeline | `interactions_lead` (tenant_id, lead_id, started_at) | btree |
@@ -168,6 +168,7 @@ Every query the app runs has an index built for it. Rules: tenant-scoped indexes
 | `rahul@gm`, `@example.org` | email ILIKE `%…%` | `contacts_search_email` (GIN trigram) |
 | `+91 98111 14321` (10+ digits) | phone_key = last 10 digits | `contacts_tenant_phone` (btree, exact) |
 | `4321`, `98111` (3–9 digits) | phone_key ILIKE `%…%` | `contacts_search_phone` (GIN trigram) |
+| (both phone rows) | also alt_phone_key — Mobile 2 | `contacts_tenant_alt_phone` / `contacts_search_alt_phone` |
 | `Rah`, `sharma` | name ILIKE `%…%`, ranked by `similarity()` | `contacts_search_name` (GIN trigram) |
 | 1 character / 1–2 digits | no search (too vague) | — |
 

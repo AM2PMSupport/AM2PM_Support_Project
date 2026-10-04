@@ -19,6 +19,8 @@ export const ManualLeadInput = z.object({
   processId: z.uuid(),
   name: z.string().trim().min(1).max(120),
   phone: z.string().trim().max(20).optional().default(""),
+  /** Mobile 2 (optional second number). */
+  altPhone: z.string().trim().max(20).optional().default(""),
   email: z.string().trim().max(254).optional().default(""),
   city: z.string().trim().max(60).optional().default(""),
   note: z.string().trim().max(500).optional().default(""),
@@ -35,8 +37,10 @@ export async function createManualLead(ctx: SessionContext, input: z.input<typeo
     tx.select({ id: processes.id, stages: processes.stages, dedupeField: processes.dedupeField }).from(processes).where(and(eq(processes.id, input.processId), eq(processes.status, "active"))),
   );
   if (!process) throw notFound("Process not found");
-  const n = normaliseLead({ ...input.custom, name: input.name, phone: input.phone, email: input.email, ...(input.city ? { city: input.city } : {}), ...(input.note ? { note: input.note } : {}) });
+  const n = normaliseLead({ ...input.custom, name: input.name, phone: input.phone, altPhone: input.altPhone, email: input.email, ...(input.city ? { city: input.city } : {}), ...(input.note ? { note: input.note } : {}) });
   if (!n.ok) throw badRequest("Enter a valid 10-digit mobile number or an email");
+  // Imports drop a bad Mobile 2 quietly; a person typing one should hear about it.
+  if (input.altPhone && !n.lead.altPhoneKey) throw badRequest("Mobile 2 must be a different, valid 10-digit mobile number");
   const direct = !!input.ownerId && canReassign(ctx.actor.role);
   const res = await createOrMergeLead(ctx, process, n.lead, { kind: sourceKind, ...(input.campaign ? { campaign: input.campaign } : {}) }, { queueAssign: !direct });
   if (direct && res.outcome === "created") await bulkAssign(ctx, { leadIds: [res.leadId], ownerId: input.ownerId! });
