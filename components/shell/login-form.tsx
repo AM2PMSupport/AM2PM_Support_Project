@@ -2,11 +2,14 @@
 
 /**
  * Email + password sign-in form. Posts to /api/auth/login, which sets the
- * HttpOnly session cookie; the password is never stored client-side.
+ * HttpOnly session cookie; the password is never stored client-side. On
+ * success the AM2PM loader covers the page until the workspace has rendered
+ * (router.replace keeps this form mounted until then).
  */
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowRight, Eye, EyeOff, KeyRound, Mail } from "lucide-react";
+import { BrandLoader } from "@/components/ui/brand-loader";
 
 export function LoginForm() {
   const router = useRouter();
@@ -14,6 +17,7 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [entering, setEntering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
@@ -28,6 +32,7 @@ export function LoginForm() {
       });
       if (res.ok) {
         const body = (await res.json()) as { home?: string };
+        setEntering(true);
         router.replace(body.home ?? "/console");
         router.refresh();
         return;
@@ -43,6 +48,7 @@ export function LoginForm() {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3" noValidate>
+      {entering && <BrandLoader overlay label="Opening your workspace" />}
       <label className="flex h-12 items-center gap-2 rounded-md border border-rule bg-sheet px-3 text-ink-3 focus-within:border-ink">
         <Mail size={16} />
         <input

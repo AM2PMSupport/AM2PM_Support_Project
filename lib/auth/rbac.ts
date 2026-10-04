@@ -108,3 +108,19 @@ export function homeFor(role: Role): string {
   const nav = navFor(role);
   return nav.includes("console") ? "/console" : nav.includes("dashboard") ? "/dashboard" : "/no-access";
 }
+
+/**
+ * Where a workspace switch lands: the module the person was on (`from`, the
+ * client's path + query), when their role in the new workspace may open it;
+ * otherwise homeFor(role). Only the module path survives, plus Setup's
+ * `?tab=`: filters, cursors and `?lead=` hold the old workspace's ids. `from`
+ * comes from the browser, so anything that isn't a known module path falls
+ * back to home (never an open redirect).
+ */
+export function landingAfterSwitch(role: Role, from: string | undefined): string {
+  const m = /^\/(console|leads|calls|dashboard|admin)(?:\?(.*))?$/.exec(from ?? "");
+  const page = m?.[1] as ReturnType<typeof navFor>[number] | undefined;
+  if (!page || !navFor(role).includes(page)) return homeFor(role);
+  const tab = page === "admin" ? new URLSearchParams(m![2] ?? "").get("tab") : null;
+  return tab && /^[a-z]+$/.test(tab) ? `/admin?tab=${tab}` : `/${page}`;
+}

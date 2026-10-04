@@ -249,6 +249,9 @@ Features the owner asked for while building. Each is live unless marked otherwis
 | 2026-10-03 | Fix: editing demo/imported leads stored without a dedupe key no longer fails with "another open lead has this number"; pasted double numbers are refused instead of half-saved | 1 | ✅ Done |
 | 2026-10-04 | Fix: workspace menu and notifications no longer hidden behind page content on any module (pop-ups and drawers render above the page) | 1 | ✅ Done |
 | 2026-10-04 | Fix: background jobs stopped mid-day (QStash daily quota used up) — one 5-minute schedule, inline auto-assign, lost CallerDesk webhooks recovered automatically; clearer "no caller-ID DID" message | 1 | ✅ Done |
+| 2026-10-04 | Loading: AM2PM logo loader for full-page waits (first open, signing in, switching workspace); skeletons shaped like each screen (Floor, Console, Leads, Calls, Setup) and skeleton rows while Leads/Calls filters or pages load | 1 | ✅ Done |
+| 2026-10-04 | Switching workspace keeps you on the module you were on (Leads, Calls, Floor, Setup tab…) when your role there can open it; otherwise your home screen. Filters and the open lead reset, since they belong to the old workspace | 1 | ✅ Done |
+| 2026-10-04 | Workspace switcher moved to the top bar of every screen, right of the title: shows the current workspace (badge + name) and drops down the list of workspaces; the avatar menu keeps profile + Sign out | 1 | ✅ Done |
 
 ## How this file is kept up to date
 
@@ -263,6 +266,9 @@ Features the owner asked for while building. Each is live unless marked otherwis
 
 | Date | Change |
 | --- | --- |
+| 2026-10-04 | Owner request: workspace badge beside the screen title on every page, with the workspace list dropping down from it (not popping up from the bottom) |
+| 2026-10-04 | Owner request: workspace switch stays on the current module instead of always opening Console |
+| 2026-10-04 | Owner request: per-screen skeleton loaders for slow loads; AM2PM logo loader for full-page loading |
 | 2026-10-04 | Owner report: bugs in every module — fixed menu layering (all modules) and the QStash quota outage behind stuck calls / unassigned leads / unprocessed webhooks |
 | 2026-10-03 | Owner request: reorder Leads columns; Mobile 2 with click-to-call per number in Leads and console |
 | 2026-10-03 | Owner request: live analog watch on the login page, synced to server time |

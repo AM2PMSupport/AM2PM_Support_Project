@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronRight, Columns3, Eye, GripVertical, ListOrdered, Pencil, Phone, RotateCcw, SlidersHorizontal, StretchHorizontal, Trash2 } from "lucide-react";
 import { StageTag, Tag } from "@/components/ui/primitives";
+import { SkeletonRows } from "@/components/ui/skeletons";
 import { COLUMNS, SOURCE_LABEL, ago, age, relTime, type ColumnKey } from "@/components/leads/meta";
 import type { LeadRow } from "@/lib/leads/list";
 
@@ -134,7 +135,7 @@ export function LeadsGrid({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {/* Scrolls both ways inside the frame; header row and name/actions columns stay pinned. */}
-      <div className={`panel min-h-0 flex-1 overflow-auto overscroll-contain transition-opacity ${pending ? "opacity-60" : ""}`}>
+      <div aria-busy={pending} className="panel min-h-0 flex-1 overflow-auto overscroll-contain">
         <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
           <thead>
             <tr className="text-left text-[11.5px] text-ink-3 [&>th]:sticky [&>th]:top-0 [&>th]:z-20 [&>th]:border-b [&>th]:border-rule [&>th]:bg-sheet">
@@ -163,7 +164,8 @@ export function LeadsGrid({
             </tr>
           </thead>
           <tbody>
-            {rows.map((l) => {
+            {/* While a filter / sort / page change loads, skeleton rows hold the table's shape (header and pinned columns stay). */}
+            {pending ? <SkeletonRows rows={Math.min(Math.max(rows.length, 8), 15)} cols={shownCols.length + (recycleBin ? 5 : 4)} /> : rows.map((l) => {
               const overdue = !!l.nextCallbackAt && new Date(l.nextCallbackAt).getTime() <= renderedAt;
               const on = selected.has(l.id);
               const bg = on ? "bg-[color-mix(in_srgb,var(--color-teal)_12%,var(--color-sheet))]" : "bg-sheet group-hover/row:bg-[color-mix(in_srgb,var(--color-paper)_70%,var(--color-sheet))]";
@@ -267,7 +269,7 @@ export function LeadsGrid({
                 </tr>
               );
             })}
-            {rows.length === 0 && (
+            {!pending && rows.length === 0 && (
               <tr>
                 <td colSpan={columns.length + 5} className="px-4 py-14 text-center text-[13px] text-ink-3">{emptyText}</td>
               </tr>

@@ -8,14 +8,15 @@
  * follows — settings, leads, processes, telephony, people — is that
  * workspace's, enforced by RLS on tenant_id. The membership is re-checked
  * live on every switch; tenantId comes from the server-side membership
- * list, never trusted from the client (RULE.md §1.7).
+ * list, never trusted from the client (RULE.md §1.7). The person stays on the
+ * module they were on when the new role can open it (landingAfterSwitch).
  */
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/auth/session";
 import { markAllRead, myNotifications } from "@/lib/notifications";
 import { accountEmail, allActiveWorkspaces, ensureSuperAdminMembership, membershipsOf, recordLogin } from "@/lib/platform-admin/auth";
 import { sessionCookieOptions, sessionToken } from "@/lib/auth/cookie";
-import { homeFor } from "@/lib/auth/rbac";
+import { landingAfterSwitch } from "@/lib/auth/rbac";
 import { withTenant, isUuid } from "@/lib/db/tenant";
 import { writeAudit } from "@/lib/audit";
 import { log } from "@/lib/log";
@@ -55,7 +56,8 @@ export async function workspacesAction(): Promise<WorkspaceOption[]> {
   return options;
 }
 
-export async function switchWorkspaceAction(tenantId: string): Promise<{ ok: true; home: string } | { ok: false; error: string }> {
+/** `from` = the page the switch was made on; the person stays there if the new role allows it. */
+export async function switchWorkspaceAction(tenantId: string, from?: string): Promise<{ ok: true; home: string } | { ok: false; error: string }> {
   const ctx = await getSession();
   if (!ctx) return { ok: false, error: "Your session has ended. Sign in again." };
   if (!isUuid(tenantId)) return { ok: false, error: "Unknown workspace" };
@@ -77,7 +79,7 @@ export async function switchWorkspaceAction(tenantId: string): Promise<{ ok: tru
     );
     await recordLogin(ctx.accountId, m.userId, m.tenantId);
     (await cookies()).set({ ...sessionCookieOptions, value: sessionToken(ctx.accountId, m) });
-    return { ok: true, home: homeFor(m.role) };
+    return { ok: true, home: landingAfterSwitch(m.role, from) };
   } catch (err) {
     log.error("workspace switch failed", { err });
     return { ok: false, error: err instanceof Error && "status" in err ? err.message : "Could not switch workspace. Try again." };

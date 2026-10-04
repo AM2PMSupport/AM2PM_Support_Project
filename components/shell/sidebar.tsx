@@ -3,9 +3,8 @@
 /**
  * Left rail. Ink background so the paper workspace reads as the "desk".
  * Bottom: the agent's own status switch — the single most-used control in a
- * call center, so it lives here, always visible. The avatar (and the
- * workspace badge under the logo) open the profile panel with the
- * workspace switcher.
+ * call center, so it lives here, always visible. The avatar opens the
+ * profile panel; the workspace switcher is in the top bar.
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -14,7 +13,7 @@ import { AudioLines, BarChart3, Headset, Settings2, UsersRound } from "lucide-re
 import { LogoMark } from "@/components/ui/logo";
 import type { AgentStatus } from "@/lib/ui/sample-data";
 import { STATUS_META } from "@/lib/ui/status";
-import { ProfileMenu, workspaceInitials } from "@/components/shell/profile-menu";
+import { ProfileMenu } from "@/components/shell/profile-menu";
 import { Portal } from "@/components/ui/portal";
 
 const NAV = [
@@ -43,16 +42,9 @@ export function Sidebar({
 
   return (
     <aside className="sticky top-0 flex h-dvh w-[76px] shrink-0 flex-col items-center border-r border-black/40 bg-ink py-4 text-sheet">
-      <Link href="/console" aria-label="AM2PM CRM home" className="mb-3">
+      <Link href="/console" aria-label="AM2PM CRM home" className="mb-6">
         <LogoMark size={30} />
       </Link>
-      <button
-        onClick={() => setMenu(true)}
-        title={`Workspace: ${workspace} — click to switch`}
-        className="mb-6 flex h-7 min-w-[44px] items-center justify-center rounded-md border border-white/15 px-1.5 font-mono text-[10.5px] font-semibold tracking-wide text-teal hover:border-teal/60"
-      >
-        {workspaceInitials(workspace)}
-      </button>
 
       <nav className="flex flex-1 flex-col gap-1">
         {NAV.filter((n) => nav.includes(n.key)).map(({ href, label, icon: Icon }) => {
@@ -77,7 +69,7 @@ export function Sidebar({
         <div className="group relative flex flex-col items-center gap-1 text-[10px] text-ink-4">
           <button
             onClick={() => setMenu(true)}
-            aria-label="Profile and workspaces"
+            aria-label="Profile"
             title={`${user.name} · ${user.roleLabel} · ${workspace}`}
             className="relative flex h-[34px] w-[34px] items-center justify-center rounded-full bg-white/10 text-[12px] font-semibold text-sheet hover:bg-white/20"
           >

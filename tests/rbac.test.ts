@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { can, canSeeFullPhone, homeFor, leadScope, navFor } from "@/lib/auth/rbac";
+import { can, canSeeFullPhone, homeFor, landingAfterSwitch, leadScope, navFor } from "@/lib/auth/rbac";
 
 describe("permission matrix (DESIGN.md §7)", () => {
   it("matches key cells", () => {
@@ -34,5 +34,33 @@ describe("permission matrix (DESIGN.md §7)", () => {
     expect(homeFor("trainer")).toBe("/dashboard");
     expect(homeFor("client")).toBe("/dashboard");
     expect(homeFor("agent")).toBe("/console");
+  });
+});
+
+describe("landingAfterSwitch", () => {
+  it("stays on the module the person was on", () => {
+    expect(landingAfterSwitch("admin", "/leads")).toBe("/leads");
+    expect(landingAfterSwitch("admin", "/calls")).toBe("/calls");
+    expect(landingAfterSwitch("admin", "/dashboard")).toBe("/dashboard");
+    expect(landingAfterSwitch("agent", "/leads")).toBe("/leads");
+  });
+
+  it("drops filters and the open lead (old workspace ids), keeps the Setup tab", () => {
+    expect(landingAfterSwitch("admin", "/leads?process=abc&status=all")).toBe("/leads");
+    expect(landingAfterSwitch("admin", "/console?lead=1b2c")).toBe("/console");
+    expect(landingAfterSwitch("admin", "/admin?tab=team")).toBe("/admin?tab=team");
+    expect(landingAfterSwitch("admin", "/admin?tab=x%22y")).toBe("/admin");
+  });
+
+  it("falls back to home when the new role can't open the module", () => {
+    expect(landingAfterSwitch("agent", "/admin?tab=team")).toBe(homeFor("agent"));
+    expect(landingAfterSwitch("agent", "/dashboard")).toBe(homeFor("agent"));
+    expect(landingAfterSwitch("client", "/console")).toBe(homeFor("client"));
+  });
+
+  it("ignores anything that isn't a module path", () => {
+    for (const bad of [undefined, "", "/", "//evil.com", "https://evil.com/leads", "/leads/../admin", "/no-access", "/leadsX"]) {
+      expect(landingAfterSwitch("admin", bad)).toBe(homeFor("admin"));
+    }
   });
 });

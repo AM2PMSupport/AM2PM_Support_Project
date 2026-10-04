@@ -11,6 +11,7 @@ import { useMemo, useState, useTransition } from "react";
 import { ArrowDownLeft, ArrowUpRight, Pause, Play, RefreshCw, Search, X } from "lucide-react";
 import { syncCallsAction } from "@/app/(app)/calls/actions";
 import { Tag } from "@/components/ui/primitives";
+import { SkeletonRows } from "@/components/ui/skeletons";
 import type { CallRow } from "@/lib/calls/list";
 
 const STATUS: Record<string, { label: string; tone: "moss" | "ember" | "muted" | "teal" }> = {
@@ -137,7 +138,7 @@ export function CallsLog({
       </div>
       {syncMsg && <p className="rounded-md bg-teal/15 px-3 py-2 text-[12.5px]">{syncMsg}</p>}
 
-      <div className={`panel min-h-0 flex-1 overflow-auto overscroll-contain transition-opacity ${pending ? "opacity-60" : ""}`}>
+      <div aria-busy={pending} className="panel min-h-0 flex-1 overflow-auto overscroll-contain">
         <table className="w-full border-separate border-spacing-0 text-[13px]">
           <thead>
             <tr className="text-left text-[11.5px] text-ink-3 [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:border-b [&>th]:border-rule [&>th]:bg-sheet">
@@ -153,7 +154,8 @@ export function CallsLog({
             </tr>
           </thead>
           <tbody>
-            {rows.map((c) => {
+            {/* Filter / page change in flight: skeleton rows under the real header. */}
+            {pending ? <SkeletonRows rows={Math.min(Math.max(rows.length, 8), 15)} cols={9} /> : rows.map((c) => {
               const st = STATUS[c.status] ?? { label: c.status.replace(/_/g, " "), tone: "muted" as const };
               const open = playing === c.id;
               return [
@@ -193,7 +195,7 @@ export function CallsLog({
                 ),
               ];
             })}
-            {rows.length === 0 && (
+            {!pending && rows.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-4 py-14 text-center text-[13px] text-ink-3">
                   No calls here yet.{canSync ? " If calls were made but don’t show, click Sync now." : ""}

@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { navFor } from "@/lib/auth/rbac";
 import { Sidebar } from "@/components/shell/sidebar";
+import { WorkspaceProvider } from "@/components/shell/workspace-switcher";
 
 const ROLE_LABEL: Record<string, string> = {
   super_admin: "Super Admin",
@@ -29,7 +30,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh">
       <Sidebar user={{ name, initials, roleLabel: ROLE_LABEL[role] ?? role }} workspace={session.tenantName} nav={navFor(role)} canTakeCalls={role === "agent" || role === "process_coordinator"} />
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+      {/* Gives every screen's top bar the workspace name for the switcher. */}
+      <WorkspaceProvider workspace={session.tenantName}>
+        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+      </WorkspaceProvider>
     </div>
   );
 }

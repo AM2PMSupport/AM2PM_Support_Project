@@ -106,7 +106,7 @@
   background: currentColor;
   animation: pulse-ring 1.8s ease-out infinite;
 }
-/* Loading placeholders (app/(app)/loading.tsx). */
+/* Loading placeholders (components/ui/skeletons.tsx, each screen's loading.tsx). */
 @keyframes skeleton-fade {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
@@ -117,7 +117,23 @@
   background: var(--color-rule);
   animation: skeleton-fade 1.4s ease-in-out infinite;
 }
+/* Full-page AM2PM loader (components/ui/brand-loader.tsx): the clock arcs
+   turn and the check-mark hand redraws, so a slow load still reads as "on it". */
+@keyframes brand-spin { to { transform: rotate(360deg); } }
+@keyframes brand-spin-back { to { transform: rotate(-360deg); } }
+@keyframes brand-check {
+  0% { stroke-dashoffset: 34; }
+  45%, 70% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -34; }
+}
+@keyframes brand-in { from { opacity: 0; } }
+.brand-loader { animation: brand-in 0.25s ease-out both; }
+.brand-arc-outer, .brand-arc-inner { transform-box: view-box; transform-origin: 50% 50%; }
+.brand-arc-outer { animation: brand-spin 2.4s linear infinite; }
+.brand-arc-inner { animation: brand-spin-back 1.6s linear infinite; }
+.brand-check { stroke-dasharray: 34; animation: brand-check 1.8s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .live-dot::after { animation: none; }
   .skeleton { animation: none; }
+  .brand-arc-outer, .brand-arc-inner, .brand-check { animation: none; stroke-dasharray: none; }
 }

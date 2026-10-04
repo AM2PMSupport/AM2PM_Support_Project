@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { Kbd } from "@/components/ui/primitives";
 import { NotificationsBell } from "@/components/shell/notifications-bell";
+import { WorkspaceSwitcher } from "@/components/shell/workspace-switcher";
 
 function useIstClock() {
   const [now, setNow] = useState<Date | null>(null);
@@ -81,6 +82,8 @@ export function Topbar({ title, subtitle, sample = false, search = true }: { tit
         <h1 className="truncate text-[17px] font-semibold tracking-tight">{title}</h1>
         {subtitle && <p className="truncate text-[12px] text-ink-3">{subtitle}</p>}
       </div>
+      {/* Which workspace you're in, on every screen; click to switch. */}
+      <WorkspaceSwitcher />
 
       {search ? <TopSearch /> : <div className="flex-1" />}
 
