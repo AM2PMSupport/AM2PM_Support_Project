@@ -251,7 +251,7 @@ Features the owner asked for while building. Each is live unless marked otherwis
 | 2026-10-04 | Fix: background jobs stopped mid-day (QStash daily quota used up) — one 5-minute schedule, inline auto-assign, lost CallerDesk webhooks recovered automatically; clearer "no caller-ID DID" message | 1 | ✅ Done |
 | 2026-10-04 | Loading: AM2PM logo loader for full-page waits (first open, signing in, switching workspace); skeletons shaped like each screen (Floor, Console, Leads, Calls, Setup) and skeleton rows while Leads/Calls filters or pages load | 1 | ✅ Done |
 | 2026-10-04 | Switching workspace keeps you on the module you were on (Leads, Calls, Floor, Setup tab…) when your role there can open it; otherwise your home screen. Filters and the open lead reset, since they belong to the old workspace | 1 | ✅ Done |
-| 2026-10-04 | Workspace switcher moved to the top bar of every screen, right of the title: shows the current workspace (badge + name) and drops down the list of workspaces; the avatar menu keeps profile + Sign out | 1 | ✅ Done |
+| 2026-10-04 | Workspace switcher moved to the top bar of every screen, first, before the title: shows the current workspace (badge + name) and drops down the list of workspaces; the avatar menu keeps profile + Sign out | 1 | ✅ Done |
 
 ## How this file is kept up to date
 

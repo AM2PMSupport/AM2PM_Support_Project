@@ -2,7 +2,7 @@
 
 /**
  * Workspace switcher (Zoho-style "jump to organisation"), in every screen's
- * top bar right of the title, so the person always sees which workspace they
+ * top bar, first (before the title), so the person always sees which workspace they
  * are working in. The chip shows the workspace; its drop-down lists every
  * workspace they can open (super admins also see the ones they aren't a member
  * of yet: "Enter"). Picking one re-issues the session for that workspace

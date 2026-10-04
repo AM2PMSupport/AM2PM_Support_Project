@@ -6,15 +6,15 @@
  * they render on the server from loading.tsx. Styles: .skeleton in globals.css.
  */
 
-/** Matches components/shell/topbar.tsx: 60px bar, title + subtitle, workspace chip, optional search box. */
+/** Matches components/shell/topbar.tsx: 60px bar, workspace chip, title + subtitle, optional search box. */
 export function TopbarSkeleton({ search = true }: { search?: boolean }) {
   return (
     <div className="flex h-[60px] shrink-0 items-center gap-6 border-b border-rule px-6">
+      <span className="skeleton h-9 w-9 shrink-0 sm:w-40" />
       <div className="flex flex-col gap-1.5">
         <span className="skeleton h-4 w-28" />
         <span className="skeleton h-3 w-52 max-w-[40vw]" />
       </div>
-      <span className="skeleton h-9 w-9 shrink-0 sm:w-40" />
       {search ? <span className="skeleton ml-auto h-9 w-[380px] max-w-[40vw]" /> : <span className="flex-1" />}
       <span className="skeleton hidden h-4 w-20 sm:block" />
     </div>

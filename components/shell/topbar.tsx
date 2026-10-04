@@ -78,12 +78,12 @@ function TopSearch() {
 export function Topbar({ title, subtitle, sample = false, search = true }: { title: string; subtitle?: string; sample?: boolean; search?: boolean }) {
   return (
     <header className="sticky top-0 z-40 flex h-[60px] items-center gap-6 border-b border-rule bg-paper/95 px-6 backdrop-blur-[2px]">
+      {/* Which workspace you're in, first on every screen; click to switch. */}
+      <WorkspaceSwitcher />
       <div className="min-w-0">
         <h1 className="truncate text-[17px] font-semibold tracking-tight">{title}</h1>
         {subtitle && <p className="truncate text-[12px] text-ink-3">{subtitle}</p>}
       </div>
-      {/* Which workspace you're in, on every screen; click to switch. */}
-      <WorkspaceSwitcher />
 
       {search ? <TopSearch /> : <div className="flex-1" />}
 
