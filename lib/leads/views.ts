@@ -31,7 +31,7 @@ export async function listViews(ctx: SessionContext) {
 }
 
 export async function saveView(ctx: SessionContext, input: z.infer<typeof ViewInput>) {
-  if (input.shared && !can(ctx.actor.role, "config", "E")) throw forbidden("Only admins can share a filter with everyone");
+  if (input.shared && !can(ctx.actor, "config", "E")) throw forbidden("Only admins can share a filter with everyone");
   // Keep only params the Leads screen understands; never paging state.
   const known = Object.keys(LeadQuery.shape).filter((k) => k !== "cursor");
   const query = Object.fromEntries(Object.entries(input.query).filter(([k, v]) => (known.includes(k) || /^cf_[a-z0-9_]{1,40}$/.test(k)) && v));
@@ -44,7 +44,7 @@ export async function deleteView(ctx: SessionContext, id: string) {
   await withTenant(ctx, async (tx) => {
     const [v] = await tx.select({ userId: savedViews.userId, shared: savedViews.shared }).from(savedViews).where(eq(savedViews.id, id));
     if (!v) throw notFound("Filter not found");
-    if (v.userId !== ctx.actor.userId && !(v.shared && can(ctx.actor.role, "config", "E"))) throw forbidden("You can only delete your own filters");
+    if (v.userId !== ctx.actor.userId && !(v.shared && can(ctx.actor, "config", "E"))) throw forbidden("You can only delete your own filters");
     await tx.delete(savedViews).where(eq(savedViews.id, id));
   });
 }

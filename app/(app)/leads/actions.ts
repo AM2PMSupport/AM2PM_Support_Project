@@ -13,7 +13,7 @@ import { log } from "@/lib/log";
 import { ViewInput, deleteView, saveView } from "@/lib/leads/views";
 import { BulkAssignInput, BulkStageInput, bulkAssign, bulkStage } from "@/lib/leads/bulk";
 import { ManualLeadInput, createManualLead } from "@/lib/leads/manual";
-import { EditLeadInput, LeadIdsInput, deleteLeads, getLeadForEdit, restoreLeads, updateLead } from "@/lib/leads/edit";
+import { EditLeadInput, LeadIdsInput, deleteLeads, restoreLeads, updateLead } from "@/lib/leads/edit";
 
 export type ActionResult<T = undefined> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -52,9 +52,6 @@ export async function createLeadAction(input: z.input<typeof ManualLeadInput>) {
 }
 
 // ── Row actions: edit, delete (Recycle bin), restore ─────────────────────────
-export async function leadForEditAction(id: string) {
-  return run((ctx) => getLeadForEdit(ctx, z.uuid().parse(id)));
-}
 export async function updateLeadAction(input: z.input<typeof EditLeadInput>) {
   return run((ctx) => updateLead(ctx, input));
 }

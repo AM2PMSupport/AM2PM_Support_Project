@@ -58,7 +58,12 @@ export type Role =
   | "process_coordinator"
   | "trainer"
   | "client"
-  | "agent";
+  | "agent"
+  // Added 2026-10-05 (MEMORIE.md): HR = employee profiles, Auditor = process
+  // audit (read-only), Accounts = billing.
+  | "hr"
+  | "auditor"
+  | "accounts";
 
 export type AssignmentMethod = "equal" | "percentage" | "ratio" | "number" | "load" | "skill";
 
@@ -677,6 +682,26 @@ export const apiKeys = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("api_keys_hash").on(t.keyHash), index("api_keys_tenant").on(t.tenantId, t.createdAt)],
+);
+
+/**
+ * Per-workspace edits to the role permission matrix (Setup → Roles). Only
+ * cells that differ from the defaults in lib/auth/rbac.ts are stored; a
+ * missing row means "default". `actions` is a subset of "VCEDAXI" in that
+ * order. Super Admin's grants are fixed and never stored here. Edited only
+ * by a Super Admin (lib/admin/roles.ts).
+ */
+export const rolePermissions = pgTable(
+  "role_permissions",
+  {
+    tenantId: tenantId(),
+    role: text("role").$type<Role>().notNull(),
+    module: text("module").notNull(),
+    actions: text("actions").notNull(),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.role, t.module] })],
 );
 
 /**

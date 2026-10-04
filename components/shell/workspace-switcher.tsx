@@ -19,17 +19,9 @@ import { Check, ChevronDown, Search } from "lucide-react";
 import { switchWorkspaceAction, workspacesAction, type WorkspaceOption } from "@/app/(app)/shell-actions";
 import { BrandLoader } from "@/components/ui/brand-loader";
 import { Portal } from "@/components/ui/portal";
+import { ROLE_LABEL } from "@/lib/auth/rbac";
+import type { Role } from "@/lib/db/schema";
 
-const ROLE_LABEL: Record<string, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  project_supervisor: "Supervisor",
-  manager: "Manager",
-  process_coordinator: "Coordinator",
-  trainer: "Trainer",
-  client: "Client",
-  agent: "Agent",
-};
 
 export function workspaceInitials(name: string) {
   return name.split(/[\s\-_.]+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "WS";
@@ -158,7 +150,7 @@ function WorkspaceMenu({ anchor, onClose }: { anchor: React.RefObject<HTMLButton
             </li>
           ))}
         {members.map((w) => (
-          <WorkspaceRow key={w.id} w={w} pending={pendingId === w.id} onPick={() => pick(w)} label={ROLE_LABEL[w.role!] ?? w.role!} />
+          <WorkspaceRow key={w.id} w={w} pending={pendingId === w.id} onPick={() => pick(w)} label={ROLE_LABEL[w.role as Role] ?? w.role!} />
         ))}
         {others.length > 0 && <li className="eyebrow px-2 pt-3 pb-1">Other workspaces · super admin</li>}
         {others.map((w) => (

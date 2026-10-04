@@ -2,7 +2,7 @@
 
 > The owner's plain-language view of the build. **Kept current**: every time a task is finished, started, added or dropped, this file and [TASK.md](TASK.md) are updated in the same change (CLAUDE.md rule). `tests/workphase.test.ts` fails if a task's status here differs from TASK.md.
 >
-> Last updated: **2026-10-04**
+> Last updated: **2026-10-05**
 
 **Legend:** ✅ Done · 🟡 In progress (partly built, note says what's left) · ⬜ To do · ❌ Dropped
 
@@ -13,7 +13,7 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | Phase | Focus | Done | In progress | To do | Complete |
 | --- | --- | --- | --- | --- | --- |
 | [Phase 0](#phase-0--decisions-and-setup) | Decisions and setup | 3 | 2 | 5 | 40% |
-| [Phase 1](#phase-1--core-crm-weeks-16) | Core CRM (weeks 1–6) | 39 | 9 | 6 | 81% |
+| [Phase 1](#phase-1--core-crm-weeks-16) | Core CRM (weeks 1–6) | 40 | 9 | 8 | 78% |
 | [Phase 2](#phase-2--automation-weeks-710) | Automation (weeks 7–10) | 1 | 2 | 15 | 11% |
 | [Phase 3](#phase-3--reporting-client-portal-backups-weeks-1114) | Reporting, client portal, backups (weeks 11–14) | 2 | 1 | 15 | 14% |
 | [Phase 4](#phase-4--later-week-15) | Later (week 15+) | 0 | 0 | 8 | 0% |
@@ -64,7 +64,7 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 - Floor dashboard on live data; notifications
 - Left in Phase 1: Google Sheet pull, Redis eligibility cache, manager digest email, nightly per-client backups, spreadsheet migration script, pilot
 
-**Progress: 39 done · 9 in progress · 6 to do — about 81% complete**
+**Progress: 40 done · 9 in progress · 8 to do — about 78% complete**
 
 | Task | Status | What | Notes |
 | --- | --- | --- | --- |
@@ -122,6 +122,9 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | T1.44 | ⬜ To do | `backup_policies`, `backup_snapshots`; nightly cron 01:30; `backup.completed/failed` alerts | — |
 | T1.45 | ⬜ To do | Migration script per spreadsheet: CRM_Calling, Marketing_Leads, CRM_WebhookLog, MissedCalls → tables; roster, dropdowns; Timeline History → `lead_events`; count reconciliation | — |
 | T1.46 | ⬜ To do | Pilot: migrate one process; run in parallel with the sheet | — |
+| T1.48 | ✅ Done | Roles HR, Auditor, Accounts; action I (import); per-workspace editable permissions (Setup → Roles, Super Admin only) | Owner request 2026-10-05 |
+| T1.49 | ⬜ To do | HR: employee profiles on the `employees` permission area | Owner request 2026-10-05 |
+| T1.50 | ⬜ To do | Accounts: client billing, invoices and payments on the `billing` permission area | Owner request 2026-10-05 |
 
 **Phase gate:** ⬜ pilot process lead counts match the sheet daily for 14 days
 
@@ -252,6 +255,8 @@ Features the owner asked for while building. Each is live unless marked otherwis
 | 2026-10-04 | Loading: AM2PM logo loader for full-page waits (first open, signing in, switching workspace); skeletons shaped like each screen (Floor, Console, Leads, Calls, Setup) and skeleton rows while Leads/Calls filters or pages load | 1 | ✅ Done |
 | 2026-10-04 | Switching workspace keeps you on the module you were on (Leads, Calls, Floor, Setup tab…) when your role there can open it; otherwise your home screen. Filters and the open lead reset, since they belong to the old workspace | 1 | ✅ Done |
 | 2026-10-04 | Workspace switcher moved to the top bar of every screen, first, before the title: shows the current workspace (badge + name) and drops down the list of workspaces; the avatar menu keeps profile + Sign out | 1 | ✅ Done |
+| 2026-10-05 | Roles HR, Auditor and Accounts; new permission letter I (import); Super Admin can edit every role's permissions per workspace in Setup → Roles (T1.48). Employee profiles (T1.49) and billing (T1.50) screens to follow | 1 | ✅ Roles done · screens to do |
+| 2026-10-05 | Full-page lead record: Edit on Leads opens /leads/{id} — every field editable (contact, Mobile 2, stage, owner, campaign, all custom fields and extra columns), every system column shown, timeline and call history with recordings side by side | 1 | ✅ Done |
 
 ## How this file is kept up to date
 
@@ -266,6 +271,8 @@ Features the owner asked for while building. Each is live unless marked otherwis
 
 | Date | Change |
 | --- | --- |
+| 2026-10-05 | Owner request: Edit opens a full-page lead editor with all fields, timeline, recordings and call history |
+| 2026-10-05 | Owner request: roles HR, Auditor, Accounts; editable permissions with I = import (T1.48 done; T1.49, T1.50 added) |
 | 2026-10-04 | Owner request: workspace badge beside the screen title on every page, with the workspace list dropping down from it (not popping up from the bottom) |
 | 2026-10-04 | Owner request: workspace switch stays on the current module instead of always opening Console |
 | 2026-10-04 | Owner request: per-screen skeleton loaders for slow loads; AM2PM logo loader for full-page loading |

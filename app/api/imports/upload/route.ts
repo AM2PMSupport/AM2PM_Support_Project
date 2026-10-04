@@ -14,7 +14,7 @@ const MAX_BYTES = 20 * 1024 * 1024;
 
 export const POST = handle(async (req: Request) => {
   const ctx = await requireSession(req);
-  requirePermission(ctx, "import_sources", "C");
+  requirePermission(ctx, "leads", "I"); // I = import (DESIGN.md §7)
   const body = (await req.json()) as HandleUploadBody;
   const result = await handleUpload({
     request: req,

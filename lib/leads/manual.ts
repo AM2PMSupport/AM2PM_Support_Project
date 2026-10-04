@@ -41,7 +41,7 @@ export async function createManualLead(ctx: SessionContext, input: z.input<typeo
   if (!n.ok) throw badRequest("Enter a valid 10-digit mobile number or an email");
   // Imports drop a bad Mobile 2 quietly; a person typing one should hear about it.
   if (input.altPhone && !n.lead.altPhoneKey) throw badRequest("Mobile 2 must be a different, valid 10-digit mobile number");
-  const direct = !!input.ownerId && canReassign(ctx.actor.role);
+  const direct = !!input.ownerId && canReassign(ctx.actor);
   const res = await createOrMergeLead(ctx, process, n.lead, { kind: sourceKind, ...(input.campaign ? { campaign: input.campaign } : {}) }, { queueAssign: !direct });
   if (direct && res.outcome === "created") await bulkAssign(ctx, { leadIds: [res.leadId], ownerId: input.ownerId! });
   return res;

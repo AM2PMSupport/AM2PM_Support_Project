@@ -11,6 +11,6 @@ export type Page = "console" | "leads" | "calls" | "dashboard" | "admin";
 export async function requirePage(page: Page): Promise<SessionContext> {
   const session = await getSession();
   if (!session) redirect("/login");
-  if (!navFor(session.actor.role).includes(page)) redirect(homeFor(session.actor.role));
+  if (!navFor(session.actor).includes(page)) redirect(homeFor(session.actor));
   return session;
 }

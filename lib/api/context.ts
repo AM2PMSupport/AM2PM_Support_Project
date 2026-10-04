@@ -12,6 +12,8 @@ import { requireSession, type SessionContext } from "@/lib/auth/session";
 import { lookupApiKey } from "@/lib/platform-admin/api-keys";
 import { ApiError, forbidden, unauthorized } from "@/lib/http/errors";
 import { redis } from "@/lib/redis/client";
+import { grantsFor } from "@/lib/auth/grants";
+
 
 export const RATE_PER_MIN = 600;
 
@@ -41,7 +43,8 @@ export async function apiContext(req: Request): Promise<ApiContext> {
     tenantName: k.tenantName,
     timezone: k.timezone,
     accountId: "",
-    actor: { userId: k.userId, role: k.role, name: `${k.name} (API)` },
+    // Same workspace permission edits as a signed-in person (Setup → Roles).
+    actor: { userId: k.userId, role: k.role, name: `${k.name} (API)`, grants: await grantsFor({ tenantId: k.tenantId, tenantSlug: k.tenantSlug, timezone: k.timezone }, k.role) },
     via: "api_key",
     scope: k.scope,
   };

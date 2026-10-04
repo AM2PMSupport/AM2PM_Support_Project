@@ -70,6 +70,16 @@ Verified: `tests/integration/postgres.test.ts` (PGlite) and a live check on Neon
 - GraphQL: authentication required for every operation including introspection; depth limit 6 (introspection exempt); batching off; unexpected errors masked as `internal` (logged server-side).
 - No phone numbers/emails in `/api/v1/users`; lead phones masked per role exactly as on screen.
 
+### 3.3 Editable role permissions (2026-10-05)
+
+- A Super Admin can change any role's permissions for their own workspace (Setup → Roles, DESIGN.md §7). "Super Admin only" is checked in code (`lib/admin/roles.ts`), not read from the matrix, so an edited matrix can never grant someone the editor.
+- Super Admin's own column is locked (no lock-out); edits for it, for unknown areas or with letters outside `VCEDAXI` are rejected on save and ignored on load.
+- Edits live in `role_permissions` under RLS, so one workspace's matrix can't be read or written from another. Every change writes `role_permission.changed` (before → after) to the audit log.
+- Every check uses the actor's grants for the current workspace, loaded per request for sessions and API keys alike; a removed permission takes effect on the editor's instance at once and on others within 30 s.
+- Data scope (own / process / tenant) and phone masking stay fixed per role; the matrix can't widen them.
+
+Verified: `tests/integration/roles.test.ts` (Super Admin only, locked column, audit, workspace isolation), `tests/rbac.test.ts` (edits reach checks, bad edits ignored).
+
 ## 4. Secrets management
 
 | Secret | Where it lives | Rotation |

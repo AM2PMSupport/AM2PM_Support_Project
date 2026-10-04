@@ -16,6 +16,7 @@ import { sessionCookieHeader, sessionToken } from "@/lib/auth/cookie";
 import { ApiError, badRequest, handle, json, unauthorized } from "@/lib/http/errors";
 import { findAccount, membershipsOf, recordLogin } from "@/lib/platform-admin/auth";
 import { homeFor } from "@/lib/auth/rbac";
+import { grantsFor } from "@/lib/auth/grants";
 import { redis } from "@/lib/redis/client";
 import { log } from "@/lib/log";
 
@@ -65,7 +66,7 @@ export const POST = handle(async (req: Request) => {
   await redis().del(emailKey);
   await recordLogin(account.id, m.userId, m.tenantId);
 
-  const res = json({ ok: true, role: m.role, name: m.name, workspace: m.tenantName, home: homeFor(m.role) });
+  const res = json({ ok: true, role: m.role, name: m.name, workspace: m.tenantName, home: homeFor({ role: m.role, grants: await grantsFor({ tenantId: m.tenantId, tenantSlug: m.tenantSlug, timezone: m.tenantTimezone }, m.role) }) });
   res.headers.append("Set-Cookie", sessionCookieHeader(sessionToken(account.id, m)));
   return res;
 });

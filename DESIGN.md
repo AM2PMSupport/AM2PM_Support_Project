@@ -342,25 +342,29 @@ Delivery: retries ~1m, 5m, 30m, 2h, 12h via QStash; 2xx = delivered; each attemp
 
 Scopes applied in queries: `own` (assigned_to = me) · `team` (assigned_to ∈ my teams' users) · `process` (process_id ∈ my `user_processes`) · `tenant` (enforced by RLS) · `global` (Super Admin, audit-logged). Client role = process scope limited to processes where `clientTenantId` = their tenant.
 
-Legend: V view · C create · E edit · D delete · A approve · X export.
+Legend: V view · C create · E edit · D delete · A approve · X export · I import.
+
+**Editable per workspace** (2026-10-05, MEMORIE.md): the table below is the default. A Super Admin can change any cell for their workspace in Setup → Roles; edits are stored in `role_permissions` (only cells that differ from the default) and applied to every check via the actor's `grants` (lib/auth/grants.ts → lib/auth/rbac.ts `can(who, …)`). Super Admin's column is locked. Data scope below (own / process / tenant) is fixed per role and not editable.
 
 Reassigning leads (bulk "Assign to…", choosing an owner on Create Lead) = `E` on leads **and** a scope wider than own (`canReassign()` in lib/auth/rbac.ts) — admins, supervisors, managers, coordinators; never agents.
 
-| Module | Super Admin | Admin | Supervisor | Manager | Coordinator | Client | Agent |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Tenants / config | VCEDAX | VCE | V | V | – | – | – |
-| Users | VCEDAX | VCEDX | VE | VE | V | – | own |
-| Leads | VCEDAX | VCEDX | VCEAX | VCEAX | VCE | V (process) | VE (own) |
-| Interactions | VX | VX | VX | VX | V | V (masked) | VC (own) |
-| Callbacks | VCEDX | VCEDX | VCEA | VCEA | VCE | – | VCE (own) |
-| Import sources | VCED | VCED | V | V | – | – | – |
-| Webhooks / workflows | VCEDX | VCED | VE | V | – | – | – |
-| Reports | VX | VX | VX | VX | V | V (assigned) | own |
-| Integrations | VCED | VCE | – | – | – | – | – |
-| Backups | VCEDAX (restore any) | VCX + request restore | V | V | – | V + download (if allowed) | – |
-| Audit logs | V | V | – | – | – | – | – |
+| Module | Super Admin | Admin | Supervisor | Manager | Coordinator | Client | Agent | HR | Auditor | Accounts |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Tenants / config | VCEDAX | VCE | V | V | – | – | – | – | – | – |
+| Users | VCEDAXI | VCEDXI | VE | VE | V | – | own | V | – | – |
+| Leads | VCEDAXI | VCEDXI | VCEAX | VCEAX | VCE | V (process) | VE (own) | – | VX (tenant) | – |
+| Interactions | VX | VX | VX | VX | V | V (masked) | VC (own) | – | VX (masked) | – |
+| Callbacks | VCEDX | VCEDX | VCEA | VCEA | VCE | – | VCE (own) | – | V | – |
+| Import sources | VCED | VCED | V | V | – | – | – | – | – | – |
+| Webhooks / workflows | VCEDX | VCED | VE | V | – | – | – | – | – | – |
+| Reports | VX | VX | VX | VX | V | V (assigned) | own | – | VX | VX |
+| Integrations | VCED | VCE | – | – | – | – | – | – | – | – |
+| Backups | VCEDAX (restore any) | VCX + request restore | V | V | – | V + download (if allowed) | – | – | – | – |
+| Audit logs | V | V | – | – | – | – | – | – | V | – |
+| Employees (T1.49) | VCEDAXI | VCEDXI | V | V | – | – | – | VCEDAXI | – | – |
+| Billing (T1.50) | VCEDAXI | V | – | – | – | – | – | – | – | VCEDAXI |
 
-Trainer: LMS only (phase 4).
+Trainer: LMS only (phase 4); default Reports V. CSV import = `I` on Leads. HR and Accounts see no leads (scope none); Auditor sees every lead in the workspace read-only (scope tenant, phones masked).
 
 ## 8. API surface
 
@@ -398,7 +402,7 @@ Errors: JSON `{ error: { code, message } }`; list endpoints return `{ items, nex
 | Agent | Inbound screen-pop | toast + auto-open of the caller's lead (or new-lead form) when an inbound call is answered on the agent's phone |
 | Agent | Lead workspace | queue filter (search name/city/phone digits/outcome · stage · source · tabs) with Prev/Next "3 of 8" through the filtered list; Details grid shows EVERY field (name, mobile, email, campaign, stage, owner, custom fields, extra imported columns, "Add a detail") editable in place — dropdowns for stage/owner/dropdown & yes-no fields, one field per save; "End that call" clears the agent's own stuck call (no provider webhook); contact card (masked per role), **Call** button ("Calling your phone…" → Ringing customer → Connected mm:ss → Ended), no dial pad or audio in the browser, disposition + sub-disposition, callback quick picks (Today 6 PM, Tomorrow, +2 days…), stage, custom fields, timeline, WhatsApp/email send (consent-gated) |
 | Everyone | Workspace switcher | avatar / workspace badge in the rail → profile panel listing every workspace the login belongs to (role per workspace); super admins also see "Enter" for the rest. Switching changes everything: setup, leads, telephony, people (SECURITY.md §3.1) |
-| Manager | Leads (Zoho-style, built 2026-10-02) | filter rail (saved filters personal/shared, system filters: my leads, unassigned, not called, callback overdue/today, re-enquired; status, stage, source, owner, process, created — with counts), sort (newest, oldest, name, next callback, last activity), list or board (by stage, drag to move), manage columns + records per page (25/50/100), bulk assign / move stage / delete / restore, row actions Edit + Delete pinned right with Lead name pinned left, table settings (Manage Columns, Reset Column Size, Records Per Page, View Mode wrap/clip, drag-to-resize columns), Prev/Next keyset paging with page x of y, Recycle bin, Edit drawer (contact, stage, owner, custom fields; phone only for roles that see full numbers), Create Lead drawer (dedupe-aware), CSV export (X permission) |
+| Manager | Leads (Zoho-style, built 2026-10-02) | filter rail (saved filters personal/shared, system filters: my leads, unassigned, not called, callback overdue/today, re-enquired; status, stage, source, owner, process, created — with counts), sort (newest, oldest, name, next callback, last activity), list or board (by stage, drag to move), manage columns + records per page (25/50/100), bulk assign / move stage / delete / restore, row actions Edit + Delete pinned right with Lead name pinned left, table settings (Manage Columns, Reset Column Size, Records Per Page, View Mode wrap/clip, drag-to-resize columns), Prev/Next keyset paging with page x of y, Recycle bin, Edit opens the full-page lead record `/leads/{id}` (2026-10-05: contact, Mobile 2, stage, owner, campaign, every custom field + extra column editable; every system column read-only; timeline + call history with recordings; phone only for roles that see full numbers; read-only without leads E), Create Lead drawer (dedupe-aware), CSV export (X permission) |
 | Everyone with calls | Calls (built 2026-10-03) | call log in scope: when (tenant tz), in/out, lead, number (masked per role), agent, result, duration, talk time, outcome; filters (today/7d/30d/all, direction, result, agent, with recording, name/digits); totals strip; ▶ inline player per call (and in the console timeline); "Sync now" (supervisors+) + automatic 15-min sync from CallerDesk |
 | Manager | Team dashboard | live agents, open/unassigned leads, SLA breaches, reassign |
 | Manager | Reports | funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, period comparisons, CSV export |

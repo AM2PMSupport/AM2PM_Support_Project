@@ -17,6 +17,7 @@ import { markAllRead, myNotifications } from "@/lib/notifications";
 import { accountEmail, allActiveWorkspaces, ensureSuperAdminMembership, membershipsOf, recordLogin } from "@/lib/platform-admin/auth";
 import { sessionCookieOptions, sessionToken } from "@/lib/auth/cookie";
 import { landingAfterSwitch } from "@/lib/auth/rbac";
+import { grantsFor } from "@/lib/auth/grants";
 import { withTenant, isUuid } from "@/lib/db/tenant";
 import { writeAudit } from "@/lib/audit";
 import { log } from "@/lib/log";
@@ -79,7 +80,7 @@ export async function switchWorkspaceAction(tenantId: string, from?: string): Pr
     );
     await recordLogin(ctx.accountId, m.userId, m.tenantId);
     (await cookies()).set({ ...sessionCookieOptions, value: sessionToken(ctx.accountId, m) });
-    return { ok: true, home: landingAfterSwitch(m.role, from) };
+    return { ok: true, home: landingAfterSwitch({ role: m.role, grants: await grantsFor(target, m.role) }, from) };
   } catch (err) {
     log.error("workspace switch failed", { err });
     return { ok: false, error: err instanceof Error && "status" in err ? err.message : "Could not switch workspace. Try again." };

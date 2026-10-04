@@ -11,19 +11,19 @@ import { z } from "zod";
 import { userProcesses, users, type Role } from "@/lib/db/schema";
 import { isUniqueViolation, withTenant } from "@/lib/db/tenant";
 import { changeLoginEmail, loginForNewMember, resetLoginPassword } from "@/lib/platform-admin/auth";
-import { requirePermission } from "@/lib/auth/rbac";
+import { requirePermission, ROLES } from "@/lib/auth/rbac";
 import type { SessionContext } from "@/lib/auth/session";
 import { writeAudit } from "@/lib/audit";
 import { badRequest, conflict, forbidden, notFound } from "@/lib/http/errors";
 import { isValidMobile10, toE164, toTenDigits } from "@/lib/phone/phone";
 
-const ROLES = ["super_admin", "admin", "project_supervisor", "manager", "process_coordinator", "trainer", "client", "agent"] as const;
-const RANK: Record<Role, number> = { super_admin: 7, admin: 6, project_supervisor: 5, manager: 4, process_coordinator: 3, trainer: 2, agent: 2, client: 1 };
+// Who may grant whom: a role can be granted only by someone ranked at or above it.
+const RANK: Record<Role, number> = { super_admin: 7, admin: 6, project_supervisor: 5, manager: 4, process_coordinator: 3, hr: 3, auditor: 3, accounts: 3, trainer: 2, agent: 2, client: 1 };
 
 export const UserInput = z.object({
   email: z.email().max(254),
   name: z.string().trim().min(2).max(80),
-  role: z.enum(ROLES),
+  role: z.enum(ROLES as [Role, ...Role[]]),
   phone: z.string().trim().max(20).optional().default(""),
   did: z.string().trim().max(20).optional().default(""),
   shareWeight: z.number().int().min(0).max(1000).default(1),

@@ -262,6 +262,25 @@ async function detailIn(tx: Tx, ctx: SessionContext, leadId: string) {
     nextCallbackAt: row.nextCallbackAt ? iso(row.nextCallbackAt) : null,
     lastDisposition: lead.lastDisposition?.label ?? null,
     createdAt: lead.createdAt.toISOString(),
+    // System columns for the full lead page (app/(app)/leads/[id]).
+    assignedAt: lead.assignedAt?.toISOString() ?? null,
+    lastActivityAt: lead.lastInteractionAt?.toISOString() ?? null,
+    lastEnquiryAt: lead.lastEnquiryAt.toISOString(),
+    convertedAt: lead.convertedAt?.toISOString() ?? null,
+    /** Call history (newest first, last 40) for the lead page's Calls tab. */
+    calls: calls.map((c) => ({
+      id: c.id,
+      type: c.type,
+      direction: c.direction,
+      status: c.status,
+      durationSec: c.durationSec,
+      talkSec: c.talkSec,
+      agentName: c.agentName,
+      outcome: c.disposition?.label ?? null,
+      notes: c.notes,
+      startedAt: iso(c.startedAt),
+      hasRecording: !!c.hasRecording,
+    })),
     timeline,
   };
 }

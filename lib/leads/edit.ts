@@ -33,7 +33,7 @@ import { badRequest, conflict, notFound } from "@/lib/http/errors";
 
 /**
  * Partial update: anything omitted stays as it is (the console saves one
- * field at a time; the Leads drawer sends the whole form). `custom` keys
+ * field at a time; the lead page /leads/{id} sends the whole form). `custom` keys
  * merge into the lead; an empty string clears that key.
  */
 export const EditLeadInput = z.object({
@@ -49,7 +49,7 @@ export const EditLeadInput = z.object({
   custom: z.record(z.string().max(60), z.string().max(500)).default({}),
 });
 
-/** Data for the Edit drawer. */
+/** Data for the lead page form (app/(app)/leads/[id]). */
 export async function getLeadForEdit(ctx: SessionContext, leadId: string) {
   requirePermission(ctx, "leads", "E");
   return withTenant(ctx, async (tx) => {
@@ -78,7 +78,7 @@ export async function getLeadForEdit(ctx: SessionContext, leadId: string) {
       stages: r.stages,
       status: r.lead.status,
       ownerId: r.lead.assignedTo,
-      canChangeOwner: canReassign(ctx.actor.role),
+      canChangeOwner: canReassign(ctx.actor),
       processName: r.processName,
       custom: Object.fromEntries(Object.entries(r.lead.custom).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : String(v ?? "")])),
       fields,
@@ -164,7 +164,7 @@ export async function updateLead(ctx: SessionContext, raw: z.input<typeof EditLe
 
   // Stage and owner through their own paths (events, capacity, conversion).
   if (input.stage && input.stage !== before.stage && before.status === "open") await setStage(ctx, { leadId: input.leadId, stage: input.stage });
-  if (input.ownerId && input.ownerId !== before.ownerId && canReassign(ctx.actor.role)) {
+  if (input.ownerId && input.ownerId !== before.ownerId && canReassign(ctx.actor)) {
     const r = await bulkAssign(ctx, { leadIds: [input.leadId], ownerId: input.ownerId });
     if (!r.moved) throw badRequest("That agent isn't mapped to this lead's process");
   }

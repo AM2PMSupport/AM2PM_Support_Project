@@ -18,7 +18,7 @@ export const metadata: Metadata = { title: "Sign in" };
 
 export default async function LoginPage() {
   const session = await getSession();
-  if (session) redirect(homeFor(session.actor.role));
+  if (session) redirect(homeFor(session.actor));
   return (
     <main className="grid min-h-dvh grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
       <section className="relative hidden flex-col justify-between overflow-hidden bg-ink p-10 text-sheet lg:flex">

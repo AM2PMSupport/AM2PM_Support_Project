@@ -10,6 +10,7 @@ import { createUserAction, resetPasswordAction, testPhoneAction, updateUserActio
 import { ChipPicker, ErrorNote, Field, GhostButton, Input, SecretOnce, Select, Submit } from "@/components/ui/form";
 import { Avatar, Tag } from "@/components/ui/primitives";
 import type { Role } from "@/lib/db/schema";
+import { ROLE_LABEL } from "@/lib/auth/rbac";
 
 export interface TeamRow {
   id: string;
@@ -29,16 +30,6 @@ export interface TeamRow {
   lastLoginAt: Date | null;
 }
 
-const ROLE_LABEL: Record<Role, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  project_supervisor: "Supervisor",
-  manager: "Manager",
-  process_coordinator: "Coordinator",
-  trainer: "Trainer",
-  client: "Client",
-  agent: "Agent",
-};
 
 function UserForm({ initial, processes, onDone }: { initial?: TeamRow; processes: { id: string; name: string }[]; onDone: (created?: { password: string | null }) => void }) {
   const [email, setEmail] = useState(initial?.email ?? "");

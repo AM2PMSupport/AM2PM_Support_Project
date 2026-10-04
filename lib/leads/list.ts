@@ -237,7 +237,7 @@ function filterConditions(ctx: SessionContext, f: Query, custom: CustomFilter[] 
 export function leadFilterWhere(ctx: SessionContext, raw: LeadQueryInput): SQL | undefined {
   const f = LeadQuery.parse(raw);
   const bin = f.status === "deleted";
-  const alive = bin ? (can(ctx.actor.role, "leads", "D") ? isNotNull(leads.deletedAt) : sql`false`) : and(eq(leads.isActive, true), isNull(leads.deletedAt));
+  const alive = bin ? (can(ctx.actor, "leads", "D") ? isNotNull(leads.deletedAt) : sql`false`) : and(eq(leads.isActive, true), isNull(leads.deletedAt));
   return and(leadScopeCondition(ctx), alive, ...filterConditions(ctx, f, parseCustomFilters(raw as Record<string, unknown>)));
 }
 

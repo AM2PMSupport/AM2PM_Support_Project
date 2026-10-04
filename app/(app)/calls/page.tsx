@@ -41,7 +41,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
             nextCursor={page.nextCursor}
             totals={totals}
             agents={options?.owners.map((o) => ({ id: o.id, name: o.name })) ?? []}
-            canSync={can(ctx.actor.role, "config", "V")}
+            canSync={can(ctx.actor, "config", "V")}
             lastSync={sync}
             timeZone={ctx.timezone}
           />

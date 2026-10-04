@@ -39,7 +39,7 @@ export const StartImportInput = z.object({
 });
 
 export async function startImport(ctx: SessionContext, input: z.infer<typeof StartImportInput>): Promise<{ batchId: string }> {
-  requirePermission(ctx, "import_sources", "C");
+  requirePermission(ctx, "leads", "I"); // I = import (DESIGN.md §7)
   if (!input.pathname.startsWith(tenantPrefix(ctx.tenantId, "imports"))) throw badRequest("File is not in this workspace's upload area");
   if (!/\.(csv|xlsx)$/i.test(input.fileName)) throw badRequest("Upload a .csv or .xlsx file");
 

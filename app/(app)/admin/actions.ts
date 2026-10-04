@@ -20,6 +20,7 @@ import { StartImportInput, startImport, listImports } from "@/lib/imports/run";
 import { CompanyInput, updateCompany } from "@/lib/admin/company";
 import { createApiKey, revokeApiKey } from "@/lib/admin/api-keys";
 import { removeSampleData } from "@/lib/admin/sample-data";
+import { PermissionInput, setRolePermission } from "@/lib/admin/roles";
 import { cookies } from "next/headers";
 import { membershipsOf } from "@/lib/platform-admin/auth";
 import { sessionCookieOptions, sessionToken } from "@/lib/auth/cookie";
@@ -52,6 +53,10 @@ export const createProcessAction = async (input: unknown) => run((ctx) => create
 export const updateProcessAction = async (id: unknown, input: unknown) => run((ctx) => updateProcess(ctx, Id.parse(id), ProcessInput.parse(input)).then(() => undefined));
 export const createDispositionAction = async (input: unknown) => run((ctx) => createDisposition(ctx, DispositionInput.parse(input)).then(() => undefined));
 export const toggleDispositionAction = async (id: unknown, active: unknown) => run((ctx) => setDispositionActive(ctx, Id.parse(id), z.boolean().parse(active)).then(() => undefined));
+
+// Roles & permissions (Super Admin only; enforced in lib/admin/roles.ts)
+export const setRolePermissionAction = async (input: unknown, reset?: unknown) =>
+  run((ctx) => setRolePermission(ctx, PermissionInput.parse(input), z.boolean().optional().parse(reset) ?? false));
 
 // Team
 export const createUserAction = async (input: unknown) => run((ctx) => createUser(ctx, UserInput.parse(input)));

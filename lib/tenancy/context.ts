@@ -8,6 +8,7 @@
  * Never from a request body a user controls.
  */
 import type { Role } from "@/lib/db/schema";
+import type { Grants } from "@/lib/auth/rbac";
 
 export interface TenantContext {
   /** Tenant UUID; becomes `app.tenant_id` inside withTenant(). */
@@ -16,8 +17,12 @@ export interface TenantContext {
   tenantSlug: string;
   /** IANA timezone for working hours, day boundaries and display. */
   timezone: string;
-  /** Who is acting. Absent for system jobs and provider webhooks. */
-  actor?: { userId: string; role: Role; name: string };
+  /**
+   * Who is acting. Absent for system jobs and provider webhooks. `grants` =
+   * the role's permissions in THIS workspace (defaults + Setup → Roles edits),
+   * loaded by lib/auth/grants.ts; absent → defaults (tests, system code).
+   */
+  actor?: { userId: string; role: Role; name: string; grants?: Grants };
 }
 
 /** Context for background work that the system does on a tenant's behalf. */

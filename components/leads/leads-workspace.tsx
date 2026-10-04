@@ -12,7 +12,6 @@ import { ArrowDownUp, ChevronLeft, ChevronRight, Columns3, Download, Filter, Lis
 import { Kbd } from "@/components/ui/primitives";
 import { FilterPanel, type FilterOptions, type SavedView } from "@/components/leads/filter-panel";
 import { LeadsGrid, type GridPrefs } from "@/components/leads/leads-grid";
-import { EditLead } from "@/components/leads/edit-lead";
 import { LeadsBoard } from "@/components/leads/leads-board";
 import { CreateLead } from "@/components/leads/create-lead";
 import { ProcessPicker } from "@/components/ui/process-picker";
@@ -105,7 +104,6 @@ export function LeadsWorkspace({
 
   const stored = useSyncExternalStore(subscribe, snapshot, () => "");
   const prefs = useMemo(() => parsePrefs(stored), [stored]);
-  const [editing, setEditing] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ ids: string[]; label: string } | null>(null);
   const recycleBin = params.status === "deleted";
   const page = Math.max(1, Number(params.page ?? 1) || 1);
@@ -328,7 +326,8 @@ export function LeadsWorkspace({
               pending={pending}
               can={{ edit: can.editStage, delete: can.delete }}
               recycleBin={recycleBin}
-              onEdit={setEditing}
+              // The list URL (page, filters, sort) rides along so "← Leads" returns to exactly this page.
+              onEdit={(id) => router.push(`/leads/${id}${sp.toString() ? `?back=${encodeURIComponent(sp.toString())}` : ""}`)}
               onDelete={(l) => setConfirm({ ids: [l.id], label: l.name })}
               onRestore={(l) => runBulk(async () => { const r = await restoreLeadsAction({ leadIds: [l.id] }); return r.ok ? { ok: true, data: { moved: r.data!.restored, skipped: r.data!.skipped } } : r; }, "Restored")}
               emptyText={recycleBin ? "The recycle bin is empty." : q ? `No leads match “${q}”. Search needs 2+ letters or 3+ digits.` : filtersOn ? "No leads match these filters." : "No leads here yet."}
@@ -364,7 +363,6 @@ export function LeadsWorkspace({
         </div>
       </div>
 
-      {editing && <EditLead leadId={editing} owners={options.owners} onClose={() => setEditing(null)} onSaved={() => startTransition(() => router.refresh())} />}
 
       {confirm && (
         <Portal>

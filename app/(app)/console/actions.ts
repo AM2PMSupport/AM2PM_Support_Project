@@ -84,7 +84,7 @@ export const updateLeadDetailsAction = async (input: z.input<typeof EditLeadInpu
 /** Agents who can own a lead of this process (for the owner dropdown); empty if the role can't reassign. */
 export const processOwnersAction = async (processId: unknown) =>
   run(async (ctx) => {
-    if (!canReassign(ctx.actor.role)) return [];
+    if (!canReassign(ctx.actor)) return [];
     const pid = Id.parse(processId);
     return withTenant(ctx, (tx) =>
       tx

@@ -51,6 +51,8 @@ Durable context for anyone (human or AI) working on this project: what was decid
 | 2026-09-30 | Shared DB + `tenantId`; dedicated DB for large/regulated clients | Cheapest, simplest ops | Cluster per tenant |
 | 2026-09-30 | Modular monolith in one Next.js repo | Small team, one deploy | Microservices |
 | 2026-09-30 | Phase 4 deferrals: LMS, attendance, shifts, reimbursements, invoicing | Focus v1 on the calling pipeline | — |
+| 2026-10-05 | Three more roles — HR, Auditor, Accounts — and a 7th action letter, I (import) | Owner request: HR manages employee profiles, Auditor audits processes (reads every lead and call in the workspace, changes nothing, phones masked), Accounts handles billing. CSV import moves from `import_sources` C to `leads` I. Departs from the fixed 8-role matrix in the .docx v1.1 (this entry wins) | Reusing Manager/Client for these jobs |
+| 2026-10-05 | Role permissions editable per workspace by a Super Admin (Setup → Roles) | Owner request (Zoho-style). Only edited cells are stored (`role_permissions`, RLS); defaults stay in code so unedited cells get future default changes. Super Admin's column is locked and "Super Admin only" is a code rule, not a matrix cell, so nobody can lock the workspace out or grant themselves the editor. Data scope (own / process / tenant) stays fixed per role. Grants load once per request with a 30 s per-instance cache | One global matrix for every workspace; letting Admins edit |
 
 ## 4. Open questions (from PRD §10)
 

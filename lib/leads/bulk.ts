@@ -26,7 +26,7 @@ export const BulkAssignInput = z.object({ leadIds: z.array(z.uuid()).min(1).max(
 export const BulkStageInput = z.object({ leadIds: z.array(z.uuid()).min(1).max(200), stage: z.string().trim().min(1).max(30) });
 
 export async function bulkAssign(ctx: SessionContext, input: z.infer<typeof BulkAssignInput>) {
-  if (!canReassign(ctx.actor.role)) throw forbidden("You don't have permission to reassign leads");
+  if (!canReassign(ctx.actor)) throw forbidden("You don't have permission to reassign leads");
   const now = new Date();
   const res = await withTenant(ctx, async (tx) => {
     const [owner] = await tx.select({ id: users.id, name: users.name }).from(users).where(and(eq(users.id, input.ownerId), eq(users.status, "active"), inArray(users.role, ["agent", "process_coordinator"])));

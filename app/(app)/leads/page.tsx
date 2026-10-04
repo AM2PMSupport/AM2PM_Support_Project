@@ -44,13 +44,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
             views={views}
             renderedAt={renderedAt}
             can={{
-              create: can(role, "leads", "C"),
-              assign: canReassign(role),
-              editStage: can(role, "leads", "E"),
-              exportCsv: can(role, "leads", "X"),
-              share: can(role, "config", "E"),
+              create: can(ctx.actor, "leads", "C"),
+              assign: canReassign(ctx.actor),
+              editStage: can(ctx.actor, "leads", "E"),
+              exportCsv: can(ctx.actor, "leads", "X"),
+              share: can(ctx.actor, "config", "E"),
               seeOwners: leadScope(role) !== "own",
-              delete: can(role, "leads", "D"),
+              delete: can(ctx.actor, "leads", "D"),
             }}
           />
         </Suspense>

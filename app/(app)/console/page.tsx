@@ -22,7 +22,7 @@ export default async function ConsolePage({ searchParams }: { searchParams: Prom
   return (
     <div className="flex h-dvh flex-col">
       <Topbar title="Console" subtitle="Your queue · click-to-call rings your phone first" />
-      <LiveConsole initialQueue={queue} initialLead={first} processes={processes} options={options} showOwners={leadScope(ctx.actor.role) !== "own"} canEdit={can(ctx.actor.role, "leads", "E")} canReassign={canReassign(ctx.actor.role)} dial={first && first.id === wanted && (dial === "primary" || dial === "alt") ? dial : undefined} />
+      <LiveConsole initialQueue={queue} initialLead={first} processes={processes} options={options} showOwners={leadScope(ctx.actor.role) !== "own"} canEdit={can(ctx.actor, "leads", "E")} canReassign={canReassign(ctx.actor)} dial={first && first.id === wanted && (dial === "primary" || dial === "alt") ? dial : undefined} />
     </div>
   );
 }

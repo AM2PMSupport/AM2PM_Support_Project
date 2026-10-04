@@ -103,6 +103,11 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 ### Migration and gate
 - [ ] T1.45 Migration script per spreadsheet: CRM_Calling, Marketing_Leads, CRM_WebhookLog, MissedCalls → tables; roster, dropdowns; Timeline History → `lead_events`; count reconciliation
 - [ ] T1.46 Pilot: migrate one process; run in parallel with the sheet
+
+### Roles and people (owner request 2026-10-05)
+- [x] T1.48 Three more roles — HR (employee profiles), Auditor (process audit, read-only, whole workspace), Accounts (billing); new action I (import, gates CSV import); per-workspace editable permission matrix in Setup → Roles (Super Admin only, Super Admin column locked, `role_permissions` + RLS, audited, 30 s per-instance cache)
+- [ ] T1.49 HR: employee profiles (joining date, documents, salary details) on the `employees` permission area
+- [ ] T1.50 Accounts: client billing, invoices and payments on the `billing` permission area
 - [ ] **Gate 1:** pilot process lead counts match the sheet daily for 14 days
 
 ## Phase 2 — Automation (weeks 7–10)

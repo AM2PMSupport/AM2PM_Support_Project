@@ -10,7 +10,7 @@ import { log } from "@/lib/log";
 export async function syncCallsAction(): Promise<{ ok: true; rows: number; failed: number } | { ok: false; error: string }> {
   const ctx = await getSession();
   if (!ctx) return { ok: false, error: "Your session has ended. Sign in again." };
-  if (!can(ctx.actor.role, "config", "V")) return { ok: false, error: "Only supervisors and admins can sync calls" };
+  if (!can(ctx.actor, "config", "V")) return { ok: false, error: "Only supervisors and admins can sync calls" };
   try {
     const r = await syncCalls(ctx);
     if (!r) return { ok: false, error: "Telephony isn't connected for this workspace" };

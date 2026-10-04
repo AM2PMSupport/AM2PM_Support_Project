@@ -15,7 +15,7 @@
  *     console opens that lead and places that call (`?dial=primary|alt`).
  */
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronRight, Columns3, Eye, GripVertical, ListOrdered, Pencil, Phone, RotateCcw, SlidersHorizontal, StretchHorizontal, Trash2 } from "lucide-react";
 import { StageTag, Tag } from "@/components/ui/primitives";
 import { SkeletonRows } from "@/components/ui/skeletons";
@@ -69,6 +69,16 @@ export function LeadsGrid({
   const [menu, setMenu] = useState<null | "root" | "columns" | "pages" | "view">(null);
   const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Scroll position per list URL (page + filters), so coming back from a lead
+  // lands on the same rows. Per-tab sessionStorage; a blocked store just means top.
+  const scroller = useRef<HTMLDivElement>(null);
+  const scrollKey = () => `leads-scroll:${window.location.search}`;
+  useLayoutEffect(() => {
+    try {
+      const y = Number(sessionStorage.getItem(scrollKey()));
+      if (y && scroller.current) scroller.current.scrollTop = y;
+    } catch {}
+  }, []);
   const { columns, widths, wrap } = prefs;
   const has = (k: ColumnKey) => columns.includes(k);
   const LABEL = Object.fromEntries(COLUMNS.map((c) => [c.key, c.label])) as Record<ColumnKey, string>;
@@ -135,7 +145,16 @@ export function LeadsGrid({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {/* Scrolls both ways inside the frame; header row and name/actions columns stay pinned. */}
-      <div aria-busy={pending} className="panel min-h-0 flex-1 overflow-auto overscroll-contain">
+      <div
+        ref={scroller}
+        onScroll={(e) => {
+          try {
+            sessionStorage.setItem(scrollKey(), String(Math.round(e.currentTarget.scrollTop)));
+          } catch {}
+        }}
+        aria-busy={pending}
+        className="panel min-h-0 flex-1 overflow-auto overscroll-contain"
+      >
         <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
           <thead>
             <tr className="text-left text-[11.5px] text-ink-3 [&>th]:sticky [&>th]:top-0 [&>th]:z-20 [&>th]:border-b [&>th]:border-rule [&>th]:bg-sheet">

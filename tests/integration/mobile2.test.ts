@@ -33,7 +33,7 @@ vi.mock("@/lib/crypto", async (importOriginal) => ({ ...(await importOriginal<ty
 
 const { createManualLead } = await import("@/lib/leads/manual");
 const { listLeads } = await import("@/lib/leads/list");
-const { updateLead } = await import("@/lib/leads/edit");
+const { updateLead, getLeadForEdit } = await import("@/lib/leads/edit");
 const { getLeadDetail } = await import("@/lib/agent/queue");
 const { placeCall } = await import("@/lib/telephony/click-to-call");
 const { releaseCallLock } = await import("@/lib/telephony/lock");
@@ -155,5 +155,25 @@ describe("editing a lead keyed nokey: at intake", () => {
     });
     await updateLead(admin, { leadId: ids[1]!, name: "Twin B", phone: "+91 55100 00000", altPhone: "9123400000" });
     expect((await getLeadDetail(admin, ids[1]!)).altPhone).toBe("+91 91234 00000");
+  });
+});
+
+describe("lead page (/leads/{id})", () => {
+  it("loads every system column and the call history for the lead", async () => {
+    const d = await getLeadDetail(admin, leadId);
+    // The two click-to-calls and the inbound missed call from Mobile 2 above.
+    expect(d.calls.filter((c) => c.direction === "outbound").length).toBeGreaterThanOrEqual(2);
+    expect(d.calls.some((c) => c.direction === "inbound" && c.status === "missed")).toBe(true);
+    expect(d.calls.every((c, i, a) => i === 0 || a[i - 1]!.startedAt >= c.startedAt)).toBe(true); // newest first
+    expect(d.createdAt).toBeTruthy();
+    expect(d.lastEnquiryAt).toBeTruthy();
+    expect(d.timeline.some((t) => t.kind === "call")).toBe(true);
+    const e = await getLeadForEdit(admin, leadId);
+    expect(e.altPhone).toBe("+919123456789");
+  });
+
+  it("another workspace can't open the lead (404, no data)", async () => {
+    await expect(getLeadDetail(other, leadId)).rejects.toMatchObject({ status: 404 });
+    await expect(getLeadForEdit(other, leadId)).rejects.toMatchObject({ status: 404 });
   });
 });
