@@ -99,6 +99,13 @@
       "when": 1791139719126,
       "tag": "0013_role_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791143801879,
+      "tag": "0014_scale_sweeps",
+      "breakpoints": true
     }
   ]
 }

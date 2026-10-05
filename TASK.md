@@ -130,6 +130,20 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [ ] T2.15 Brevo adapter: campaigns to consented contacts, status webhook
 - [ ] T2.16 Resend adapter: broadcasts + transactional, unsubscribe link
 - [ ] T2.17 `contacts.consent` UI + DNC enforcement across all senders
+
+### Workforce — Jibble (owner request 2026-10-05, DESIGN.md §11)
+- [ ] T2.18 Jibble connection: Setup → Integrations, Client ID + Secret encrypted (envelope, like CallerDesk), token cached in Redis, Test connection; Admin / Super Admin only; adapter `lib/providers/workforce/jibble.ts`
+- [ ] T2.19 Employee sync: Jibble People ↔ CRM users by email (daily + on demand); unmatched list with manual link; code, group, position, managers, status → `employee_links` / HR profiles (T1.49)
+- [ ] T2.20 Live attendance on Floor: clocked in / on break / out per agent (GetCurrentTotalsForScope + People latest entry), polled every 5 min on the existing sweep, Redis presence kept 10 min (longer than the poll) and treated as unknown — not "clocked out" — when older than that
+- [ ] T2.21 Mismatch alerts to supervisors: on calls / active in CRM but not clocked in; clocked in but no calls for X min; on Jibble break while taking calls
+- [ ] T2.22 Attendance-aware assignment: eligibility adds "clocked in and not on break / leave" (per-process toggle, off by default)
+- [ ] T2.23 Daily agent sheet: first in, last out, worked hours, breaks, late vs Jibble schedule + CRM calls, connected, talk time, leads, conversions → talk-time %, calls / worked hour
+- [ ] T2.24 Weekly / monthly productivity per team and process with Excel export (TimesheetsSummary, TrackedTimeReport)
+- [ ] T2.25 Leave and holidays: who is on leave today / upcoming; assignment skips them; callbacks booked for an agent on leave flagged for reassignment
+- [ ] T2.26 Holiday calendar (Jibble Calendars) feeds process working hours and SLA clocks
+- [ ] T2.27 Billable hours per client for Accounts (T1.50): Jibble projects/clients ↔ CRM workspaces/processes; monthly hours from timesheets
+- [ ] T2.28 Auditor / HR attendance audit: clock-in location + device, outside-geofence flag, timesheet approval status; Jibble screenshots optional (off by default, role-limited)
+- [ ] T2.29 Two-way (opt-in, off by default): CRM Available / Break / Offline → Jibble clock in / break / clock out; verify break handling against the live Jibble setup first
 - [ ] **Gate 2:** a signed `lead.converted` reaches a client system and is verified there
 
 ## Phase 3 — Reporting and portal (weeks 11–14)

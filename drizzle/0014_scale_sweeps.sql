@@ -1,0 +1,2 @@
+ALTER TABLE "leads" ADD COLUMN "sla_alerted_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "webhook_events_received" ON "webhook_events" USING btree ("created_at") WHERE "webhook_events"."status" = 'received';

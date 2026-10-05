@@ -24,6 +24,10 @@
     {
       "path": "/api/cron/recount-open-leads",
       "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/cron/tick",
+      "schedule": "30 3 * * *"
     }
   ]
 }

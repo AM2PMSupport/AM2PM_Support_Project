@@ -39,7 +39,7 @@ These rules apply to every change. A PR that breaks one is not merged. Why each 
 2. No function runs longer than ~60 s; fan out via QStash or save a cursor and re-queue.
 3. Every job handler is **idempotent**: QStash delivers at least once and retries count as messages.
 4. `/api/jobs/*` verifies the QStash signature; `/api/cron/*` verifies `CRON_SECRET`. Reject otherwise.
-5. Cron routes only fan out work; they do not process it.
+5. Cron routes run their (idempotent, time-boxed) job directly — they are the backup path that must work when QStash is out of quota or down (2026-10-05, MEMORIE.md). Each job stays under the 60 s function limit; anything bigger fans out through QStash as before.
 6. No long-running listeners (change streams, WebSocket servers, BullMQ). Use outbox + QStash + SSE.
 7. Redis holds only rebuildable state. Never the only copy of any record.
 

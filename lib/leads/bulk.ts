@@ -49,7 +49,7 @@ export async function bulkAssign(ctx: SessionContext, input: z.infer<typeof Bulk
     if (openTo) await tx.update(users).set({ openLeads: sql`${users.openLeads} + ${openTo}` }).where(eq(users.id, owner.id));
 
     const ids = moving.map((l) => l.id);
-    await tx.update(leads).set({ assignedTo: owner.id, assignedAt: now }).where(inArray(leads.id, ids));
+    await tx.update(leads).set({ assignedTo: owner.id, assignedAt: now, slaAlertedAt: null }).where(inArray(leads.id, ids));
     await tx.update(callbacks).set({ assignedTo: owner.id }).where(and(inArray(callbacks.leadId, ids), eq(callbacks.status, "pending")));
     await tx.insert(leadEvents).values(
       moving.map((l) => ({ leadId: l.id, type: (l.assignedTo ? "reassigned" : "assigned") as "reassigned" | "assigned", actor: { kind: "user" as const, id: ctx.actor.userId, name: ctx.actor.name }, before: { assignedTo: l.assignedTo }, after: { assignedTo: owner.id } })),

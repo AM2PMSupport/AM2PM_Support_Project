@@ -35,7 +35,7 @@ Base URL (production): `https://am2pmsupportproject.vercel.app`
 | Caller | Mechanism | Used by |
 | --- | --- | --- |
 | People (agents, managers, admins, clients) | Signed session cookie `am2pm_session` from `POST /api/auth/login` (email + password). Google / OTP / TOTP may be added later | `/api/v1/*`, `/api/graphql`, app screens |
-| Integrations, partners, client CRMs | **API key** `Authorization: Bearer am2pm_…` (Setup → API keys; shown once, SHA-256 stored). Acts as the admin who created it — same role, scope (RLS) and audit trail. Scope `read` (GET + GraphQL queries) or `write` (also creates/updates/deletes; else `403 read_only_key`). Rate limit **600 requests/min per key** → `429 rate_limited`. Revoked/unknown key → `401 invalid_api_key` | `/api/v1/*`, `/api/graphql` |
+| Integrations, partners, client CRMs | **API key** `Authorization: Bearer am2pm_…` (Setup → API keys; shown once, SHA-256 stored). Acts as the admin who created it — same role, scope (RLS) and audit trail. Scope `read` (GET + GraphQL queries) or `write` (also creates/updates/deletes; else `403 read_only_key`). Rate limits: **600 requests/min per key** and **1,200/min per workspace across all its keys**; signed-in browser calls **300/min per person** → `429 rate_limited`. Revoked/unknown key → `401 invalid_api_key` | `/api/v1/*`, `/api/graphql` |
 | Lead sources | Source key in header `x-source-key` (or `?key=`), shown once when the source is created | `/api/hooks/{tenant}/{sourceId}` |
 | Telephony provider | Per-tenant webhook secret in the URL path `/{key}` (current) or `?key=` (older URLs); CallerDesk sends no signature | `/api/hooks/{tenant}/telephony/{provider}/{key}` |
 | QStash (internal) | `Upstash-Signature` header, verified with current + next signing keys | `/api/jobs/*` |
@@ -53,7 +53,7 @@ Email + password sign-in. Body `{ "email": "…", "password": "…" }`.
 | --- | --- | --- |
 | 400 | `bad_request` | Missing / invalid email or password |
 | 401 | `invalid_credentials` | Wrong email or password (same message for both) |
-| 429 | `too_many_attempts` | 5 failures for this email or 30 from this IP in 15 min |
+| 429 | `too_many_attempts` | 5 failures for this email or 300 from this IP in 15 min (a whole office shares one IP) |
 
 The login is one per person across workspaces (SECURITY.md §3.1); sign-in opens the workspace used last, and the in-app switcher re-issues the cookie for another membership. Cookies issued before 2026-10-02 (no login id) are rejected once — sign in again.
 
@@ -140,7 +140,7 @@ Not for external use. Jobs: `process-webhook`, `assign-lead`, `deliver-webhook`,
 
 ### 3.5 `GET /api/cron/{job}` — internal (Vercel Cron)
 
-Fans out the matching job to QStash. Allowed: `relay-outbox`, `sweep-unassigned`, `sweep-stuck-calls`, `purge-expired`, `recount-open-leads`. Schedules are in `vercel.json` (daily while the team is on the Hobby plan; see TASK.md T3.15).
+Runs the matching job **directly in this request** (no QStash, 2026-10-05) so the daily crons keep working when the queue is out of quota or down. Allowed: `relay-outbox`, `sweep-unassigned`, `sweep-stuck-calls`, `purge-expired`, `recount-open-leads`, `callback-reminders`, `tick` (daily backup run of the 5-minute timer). Schedules are in `vercel.json` (daily while the team is on the Hobby plan; see TASK.md T3.15). Responds `{ ok, ms }`.
 
 Frequent jobs run on **one QStash schedule**, `tick` every 5 min (created by `npm run setup:schedules`, id `am2pm-tick`), which calls `/api/jobs/tick` with a signature. Each tick runs `callback-reminders`; the ticks at :00/:15/:30/:45 also run `relay-outbox`, `sweep-stuck-calls`, `sweep-unassigned` (assigns inline — no message per lead), re-queue of webhooks stuck in `received`, and `sync-calls`. Budget: 288 messages/day of QStash's free 1,000; the per-job schedules were retired on 2026-10-04 after they plus per-lead messages exhausted the daily quota.
 
@@ -330,7 +330,7 @@ When an endpoint ships: move it to §3 with its real request/response and error 
 
 - **Auth**: session cookie or `Authorization: Bearer am2pm_…` (§2). Mutations need a `write` key. Unauthenticated → `errors[0].extensions.code = "unauthorized"`.
 - **Errors**: `errors[].extensions.code` uses the REST codes (`invalid_input`, `read_only_key`, `forbidden`, `not_found`, `conflict`, `rate_limited`, `invalid_api_key`, `internal`).
-- **Limits**: max selection depth 6 (introspection exempt); no batching; 600 requests/min per API key (shared with REST).
+- **Limits**: max selection depth 6 (introspection exempt); no batching; 600 requests/min per API key and 1,200/min per workspace (shared with REST); 300/min per signed-in person.
 - **Speed**: `lead(id)` is a single SQL statement; `leads { total }` is only counted when you select `total`; `processes { outcomes }` only loads outcomes when selected.
 - **Paging**: keyset — `leads(after: endCursor)` for next, `leads(before: startCursor)` for previous; `calls(after: endCursor)`.
 - **Introspection / GraphiQL**: allowed for authenticated callers (open `/api/graphql` in a signed-in browser).

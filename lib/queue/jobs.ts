@@ -33,8 +33,10 @@ export interface JobPayloads {
   "callback-reminders": Record<string, never>;
   /** Import the next 500 rows of an uploaded CSV/Excel file (T1.26). */
   "import-batch": { tenantId: string; batchId: string; offset: number };
-  /** Pull every tenant's provider call report (fills in missed webhooks; every 15 min). */
+  /** Pull every tenant's provider call report (fills in missed webhooks). */
   "sync-calls": Record<string, never>;
+  /** One tenant's call report — fan-out mode only (QUEUE_FANOUT=1, paid QStash). */
+  "sync-calls-tenant": { tenantId: string };
   /** Copy a provider recording URL into Blob/R2. */
   "copy-recording": { tenantId: string; interactionId: string };
 }
@@ -54,6 +56,7 @@ export const JOB_NAMES = [
   "callback-reminders",
   "copy-recording",
   "sync-calls",
+  "sync-calls-tenant",
   "tick",
 ] as const satisfies readonly JobName[];
 

@@ -103,7 +103,7 @@ export async function assignLead(ctx: TenantContext, leadId: string, now = new D
         .update(assignmentState)
         .set({ seq: next.seq, smoothWeights: next.smoothWeights, dailyCounts: next.dailyCounts, day: today })
         .where(eq(assignmentState.processId, process.id));
-      await tx.update(leads).set({ assignedTo: agent.id, assignedAt: now }).where(eq(leads.id, lead.id));
+      await tx.update(leads).set({ assignedTo: agent.id, assignedAt: now, slaAlertedAt: null }).where(eq(leads.id, lead.id));
       await tx.insert(leadEvents).values({
         leadId: lead.id,
         type: "assigned",

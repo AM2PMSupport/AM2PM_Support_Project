@@ -13,6 +13,8 @@ import { withTenant } from "@/lib/db/tenant";
 import { sha256Hex } from "@/lib/crypto";
 import { enqueue } from "@/lib/queue/qstash";
 import type { TenantContext } from "@/lib/tenancy/context";
+import { log } from "@/lib/log";
+
 
 export interface ReceiveInput {
   ctx: TenantContext;
@@ -34,7 +36,14 @@ export async function receiveWebhook(input: ReceiveInput): Promise<{ duplicate: 
   );
   if (!row) return { duplicate: true };
 
-  await enqueue("process-webhook", { tenantId: ctx.tenantId, webhookEventId: row.id }, { deduplicationId: `wh:${row.id}` });
+  try {
+    await enqueue("process-webhook", { tenantId: ctx.tenantId, webhookEventId: row.id }, { deduplicationId: `wh:${row.id}` });
+  } catch (err) {
+    // Queue refused (quota / billing / outage): the event is SAVED, so answer 200 —
+    // a 500 would make the provider retry, and its retry would look like a duplicate.
+    // The stuck-webhook sweep processes it (inline while the queue is degraded).
+    log.warn("webhook stored but not queued; the sweep will process it", { tenant: ctx.tenantSlug, source, err });
+  }
   return { duplicate: false };
 }
 

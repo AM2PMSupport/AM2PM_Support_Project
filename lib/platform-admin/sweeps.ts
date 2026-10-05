@@ -6,17 +6,23 @@
  * work and hands it to per-tenant code or jobs, except for purely technical
  * updates (stuck-call status, retention purge).
  */
-import { and, asc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { interactions, leads, outbox, webhookDeliveries, webhookEvents } from "@/lib/db/schema";
+import { and, asc, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { interactions, outbox, webhookEvents } from "@/lib/db/schema";
 import { publishOutbox } from "@/lib/events/outbox";
 import { enqueue } from "@/lib/queue/qstash";
 import { releaseCallLock } from "@/lib/telephony/lock";
 import { platformDb } from "@/lib/platform-admin/db";
 import { contextForTenantId } from "@/lib/platform-admin/tenants";
 import { assignLead } from "@/lib/assignment/assign";
+import { processWebhook } from "@/lib/jobs/process-webhook";
+import { queueDegraded } from "@/lib/queue/health";
 import { log } from "@/lib/log";
 
 const BATCH = 500;
+/** Per-client share of a sweep batch, so one client's backlog can't starve the others. */
+const PER_TENANT = 25;
+/** Rows deleted per statement in the nightly purge (short transactions, resumable). */
+const PURGE_CHUNK = 5000;
 const DAY_MS = 86_400_000;
 
 /** Outbox rows not published within a minute of commit (function died mid-way). */
@@ -49,12 +55,21 @@ export async function relayOutbox(): Promise<number> {
  */
 export async function sweepUnassigned(budgetMs = 20_000): Promise<{ tried: number; assigned: number }> {
   const started = Date.now();
-  const rows = await platformDb()
-    .select({ id: leads.id, tenantId: leads.tenantId })
-    .from(leads)
-    .where(and(isNull(leads.assignedTo), eq(leads.status, "open"), eq(leads.isActive, true)))
-    .orderBy(asc(leads.createdAt))
-    .limit(BATCH);
+  // Oldest PER_TENANT unassigned leads of EACH client (window over the
+  // leads_unassigned partial index), oldest first overall. A client with
+  // thousands of unassignable leads (no agents mapped) gets its 25 tries and
+  // can't push everyone else's leads out of the batch.
+  const result = await platformDb().execute(sql`
+    select id, tenant_id as "tenantId" from (
+      select l.id, l.tenant_id, l.created_at,
+             row_number() over (partition by l.tenant_id order by l.created_at) as rn
+      from leads l
+      where l.assigned_to is null and l.status = 'open' and l.is_active
+    ) x
+    where rn <= ${PER_TENANT}
+    order by created_at
+    limit ${BATCH}`);
+  const rows = result.rows as { id: string; tenantId: string }[];
   const ctxs = new Map<string, Awaited<ReturnType<typeof contextForTenantId>>["ctx"]>();
   let tried = 0;
   let assigned = 0;
@@ -77,11 +92,16 @@ export async function sweepUnassigned(budgetMs = 20_000): Promise<{ tried: numbe
  * Webhooks stored but never queued: QStash refused the publish (quota, outage)
  * and the provider's retry then looked like a duplicate, so nothing would ever
  * process them. Re-queue those still "received" after 2 minutes (last 2 days).
+ *
+ * Safety net (lib/queue/health.ts): while the queue is degraded — or as soon
+ * as a re-queue fails — they are PROCESSED HERE, inline, until `deadline`,
+ * so calls and leads keep flowing without QStash.
  */
-export async function requeueStuckWebhooks(): Promise<number> {
+export async function requeueStuckWebhooks(deadline = Date.now() + 40_000): Promise<number> {
   const stuck = await platformDb()
     .select({ id: webhookEvents.id, tenantId: webhookEvents.tenantId })
     .from(webhookEvents)
+    // Served by the webhook_events_received partial index (only unprocessed rows).
     .where(
       and(
         eq(webhookEvents.status, "received"),
@@ -90,13 +110,31 @@ export async function requeueStuckWebhooks(): Promise<number> {
       ),
     )
     .orderBy(asc(webhookEvents.createdAt))
-    .limit(100);
+    .limit(500);
   const bucket = Math.floor(Date.now() / (15 * 60_000)); // one retry per sweep
+  let inline = await queueDegraded();
+  let handled = 0;
   for (const w of stuck) {
-    await enqueue("process-webhook", { tenantId: w.tenantId, webhookEventId: w.id }, { deduplicationId: `wh-requeue:${w.id}:${bucket}` });
+    if (Date.now() > deadline) break;
+    if (!inline) {
+      try {
+        await enqueue("process-webhook", { tenantId: w.tenantId, webhookEventId: w.id }, { deduplicationId: `wh-requeue:${w.id}:${bucket}` });
+        handled++;
+        continue;
+      } catch {
+        inline = true; // queue just refused: process this one and the rest right here
+      }
+    }
+    try {
+      const { ctx } = await contextForTenantId(w.tenantId);
+      await processWebhook(ctx, w.id);
+      handled++;
+    } catch (err) {
+      log.error("inline webhook processing failed; next sweep retries", { tenantId: w.tenantId, err });
+    }
   }
-  if (stuck.length) log.warn("re-queued webhooks that were never processed", { count: stuck.length });
-  return stuck.length;
+  if (handled) log.warn(inline ? "processed stuck webhooks inline (queue degraded)" : "re-queued webhooks that were never processed", { count: handled });
+  return handled;
 }
 
 /** Click-to-calls with no webhook for 10 minutes → "unknown"; free the agent. */
@@ -117,16 +155,30 @@ export async function sweepStuckCalls(): Promise<number> {
 /**
  * Retention (Postgres has no TTL indexes): delete raw webhooks after 60 days,
  * published outbox rows after 30, delivery logs after 90 (ARCHITECTURE.md §6).
+ *
+ * In chunks of PURGE_CHUNK until done or the budget runs out: one unbounded
+ * DELETE over 300 clients' daily volume (or after a missed night) could pass
+ * 60 s, roll back and never finish. Whatever is left goes next night.
  */
-export async function purgeExpired(now = Date.now()): Promise<Record<string, number>> {
+export async function purgeExpired(now = Date.now(), budgetMs = 45_000): Promise<Record<string, number>> {
   const db = platformDb();
-  const count = (r: { rowCount?: number | null }) => r.rowCount ?? 0;
+  const started = Date.now();
+  const chunked = async (table: string, column: string, cutoff: Date, extra = sql``) => {
+    let total = 0;
+    while (Date.now() - started < budgetMs) {
+      const r = await db.execute(sql`
+        delete from ${sql.identifier(table)} where id in (
+          select id from ${sql.identifier(table)} where ${sql.identifier(column)} < ${cutoff} ${extra} limit ${PURGE_CHUNK})`);
+      const n = r.rowCount ?? 0;
+      total += n;
+      if (n < PURGE_CHUNK) break;
+    }
+    return total;
+  };
   return {
-    webhookEvents: count(await db.delete(webhookEvents).where(lt(webhookEvents.createdAt, new Date(now - 60 * DAY_MS)))),
-    outbox: count(
-      await db.delete(outbox).where(and(isNotNull(outbox.publishedAt), lt(outbox.publishedAt, new Date(now - 30 * DAY_MS)))),
-    ),
-    webhookDeliveries: count(await db.delete(webhookDeliveries).where(lt(webhookDeliveries.createdAt, new Date(now - 90 * DAY_MS)))),
+    webhookEvents: await chunked("webhook_events", "created_at", new Date(now - 60 * DAY_MS)),
+    outbox: await chunked("outbox", "published_at", new Date(now - 30 * DAY_MS), sql`and published_at is not null`),
+    webhookDeliveries: await chunked("webhook_deliveries", "created_at", new Date(now - 90 * DAY_MS)),
   };
 }
 

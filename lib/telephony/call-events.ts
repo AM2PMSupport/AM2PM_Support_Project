@@ -41,7 +41,8 @@ import { log } from "@/lib/log";
 const MATCH_WINDOW_MS = 3 * 60 * 60 * 1000;
 /** Calls a late real result may still match: open ones, plus the sweeper's / agent's "unknown". */
 const MATCHABLE_CLOSED = [...OUTBOUND_TERMINAL].filter((s) => s !== "unknown");
-const TERMINAL = new Set(["completed", "missed", "agent_no_answer", "busy", "no_answer", "failed"]);
+/** Statuses a call never leaves (also used by the call sync to skip settled report rows). */
+export const TERMINAL = new Set(["completed", "missed", "agent_no_answer", "busy", "no_answer", "failed"]);
 const PRESENCE_TTL = 4 * 60 * 60;
 
 export async function applyCallEvents(ctx: TenantContext, integration: Integration, events: NormalisedCallEvent[]): Promise<void> {
@@ -155,12 +156,12 @@ async function applyOne(ctx: TenantContext, integration: Integration, ev: Normal
     // if it never completed (e.g. the job failed); otherwise nothing to do.
     if (found.recordingUrl === ev.recordingUrl) {
       if (!found.recordingKey && isAllowedRecordingUrl(ev.recordingUrl)) {
-        await enqueue("copy-recording", { tenantId: ctx.tenantId, interactionId: found.id }, { deduplicationId: `rec:${found.id}` });
+        await queueCopy(ctx, found.id);
       }
       return;
     }
     await withTenant(ctx, (tx) => tx.update(interactions).set({ recordingUrl: ev.recordingUrl }).where(eq(interactions.id, found.id)));
-    await enqueue("copy-recording", { tenantId: ctx.tenantId, interactionId: found.id }, { deduplicationId: `rec:${found.id}` });
+    await queueCopy(ctx, found.id);
     return;
   }
 
@@ -248,4 +249,13 @@ async function createMissedCallCallback(tx: Tx, ctx: TenantContext, leadId: stri
     })
     .onConflictDoNothing();
   await tx.update(leads).set({ nextCallbackAt: at }).where(eq(leads.id, leadId));
+}
+
+/** Queue the recording copy; if the queue refuses, the call sync re-queues it on a later run. */
+async function queueCopy(ctx: TenantContext, interactionId: string): Promise<void> {
+  try {
+    await enqueue("copy-recording", { tenantId: ctx.tenantId, interactionId }, { deduplicationId: `rec:${interactionId}` });
+  } catch {
+    // Not fatal: the call is saved with its recording URL; copying waits for the queue.
+  }
 }

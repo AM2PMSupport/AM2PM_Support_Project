@@ -202,40 +202,67 @@ export function LiveConsole({
   }, []);
 
   // Poll call status during a call; poll queue + screen-pop otherwise.
+  // Scale (500+ agents): the next poll is scheduled only after the previous one
+  // finishes (no pile-up when the server is slow), an idle console doesn't poll
+  // while its tab is hidden (it refreshes the moment it's shown again), and a
+  // live call is checked every 3 s (10 s when hidden).
   useEffect(() => {
     const live = phase === "agent_ringing" || phase === "customer_ringing" || phase === "connected";
-    const t = setInterval(
-      async () => {
-        if (live) {
-          const r = await callStatusAction(callId ?? undefined);
-          if (r.ok && r.data) {
-            const p = phaseOf(r.data.status);
-            if (p === "connected" && connectedAt.current === null) connectedAt.current = Date.now();
-            if (p === "ended") {
-              setEndReason(r.data.status === "completed" ? null : r.data.status.replace(/_/g, " "));
-              if (r.data.durationSec) setTalk(r.data.durationSec);
-              void refreshQueue();
-            }
-            setPhase(p);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      if (live) {
+        const r = await callStatusAction(callId ?? undefined);
+        if (r.ok && r.data) {
+          const p = phaseOf(r.data.status);
+          if (p === "connected" && connectedAt.current === null) connectedAt.current = Date.now();
+          if (p === "ended") {
+            setEndReason(r.data.status === "completed" ? null : r.data.status.replace(/_/g, " "));
+            if (r.data.durationSec) setTalk(r.data.durationSec);
+            void refreshQueue();
           }
-        } else {
-          await refreshQueue();
-          const r = await callStatusAction();
-          if (r.ok && r.data && r.data.leadId && r.data.direction === "inbound" && r.data.id !== callId) {
-            // Inbound call answered on my phone → open that lead (screen-pop).
-            const d = await leadAction(r.data.leadId);
-            if (d.ok) {
-              setLead(d.data);
-              resetWorkspace();
-              setCallId(r.data.id);
-              setPhase(phaseOf(r.data.status));
-            }
+          setPhase(p);
+        }
+      } else {
+        await refreshQueue();
+        const r = await callStatusAction();
+        if (r.ok && r.data && r.data.leadId && r.data.direction === "inbound" && r.data.id !== callId) {
+          // Inbound call answered on my phone → open that lead (screen-pop).
+          const d = await leadAction(r.data.leadId);
+          if (d.ok) {
+            setLead(d.data);
+            resetWorkspace();
+            setCallId(r.data.id);
+            setPhase(phaseOf(r.data.status));
           }
         }
-      },
-      live ? 2000 : 20000,
-    );
-    return () => clearInterval(t);
+      }
+    };
+    const schedule = () => {
+      if (stopped) return;
+      const hidden = document.visibilityState === "hidden";
+      if (hidden && !live) return; // resumed by onVisible
+      timer = setTimeout(async () => {
+        try {
+          await poll();
+        } catch {
+          // Network blip: try again on the next round.
+        }
+        schedule();
+      }, live ? (hidden ? 10_000 : 3_000) : 20_000);
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || live) return;
+      clearTimeout(timer);
+      void poll().catch(() => undefined).finally(schedule);
+    };
+    schedule();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [phase, callId, refreshQueue]);
 
   // Talk timer.

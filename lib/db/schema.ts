@@ -341,6 +341,8 @@ export const leads = pgTable(
     lastDisposition: jsonb("last_disposition").$type<{ code: string; label: string; category: string; at: string }>(),
     lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
     nextCallbackAt: timestamp("next_callback_at", { withTimezone: true }),
+    /** When supervisors were told this lead breached its unassigned SLA (once per lead; lib/platform-admin/reminders.ts). */
+    slaAlertedAt: timestamp("sla_alerted_at", { withTimezone: true }),
     lastEnquiryAt: timestamp("last_enquiry_at", { withTimezone: true }).notNull().defaultNow(),
     convertedAt: timestamp("converted_at", { withTimezone: true }),
     /** Dedupe value (phone key, email or custom field) — unique among ACTIVE leads of a process. */
@@ -520,6 +522,8 @@ export const webhookEvents = pgTable(
   (t) => [
     uniqueIndex("webhook_events_idem").on(t.tenantId, t.source, t.idempotencyKey),
     index("webhook_events_created").on(t.createdAt),
+    // Stuck-webhook sweep: only the few still "received", not two days of processed rows.
+    index("webhook_events_received").on(t.createdAt).where(sql`${t.status} = 'received'`),
   ],
 );
 

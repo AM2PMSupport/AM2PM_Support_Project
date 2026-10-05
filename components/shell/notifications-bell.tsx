@@ -35,8 +35,12 @@ export function NotificationsBell() {
 
   useEffect(() => {
     let alive = true;
+    // Hidden tabs skip the poll (500+ users × every page adds up); shown again → refresh now.
+    let busy = false;
     const load = async () => {
-      const d = await notificationsAction();
+      if (busy || document.visibilityState === "hidden") return;
+      busy = true;
+      const d = await notificationsAction().finally(() => (busy = false));
       if (alive) {
         setData(d);
         setNow(Date.now());
@@ -44,10 +48,13 @@ export function NotificationsBell() {
     };
     const first = setTimeout(load, 0);
     const t = setInterval(load, 30_000);
+    const onVisible = () => document.visibilityState === "visible" && void load();
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       alive = false;
       clearTimeout(first);
       clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

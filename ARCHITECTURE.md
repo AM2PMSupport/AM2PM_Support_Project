@@ -45,13 +45,14 @@ Every external event is **saved and queued before any work runs**; short serverl
 | Queue | Upstash QStash (Vercel Queues as alternative) | Deliver jobs with retry/backoff; DLQ; delayed messages (reminders) | Hold state beyond the message |
 | Live state | Upstash Redis | Presence, live counts, eligible-agent cache (30 s), rate limits | Be the only copy of any record |
 | Workers | Vercel Functions `/api/jobs/*` | Import, dedupe, assign, calls, webhooks, workflows, reminders, rollups, backups | Run longer than ~60 s — fan out or re-queue |
-| Scheduler | Vercel Cron `/api/cron/*` → QStash fan-out | Replaces every Apps Script time trigger | Do heavy work in the cron request itself |
+| Scheduler | One QStash schedule (`tick`, 5 min) + Vercel Cron `/api/cron/*` running jobs directly as the backup | Replaces every Apps Script time trigger | Run longer than the 45 s tick budget |
 | Database | Neon serverless Postgres via Vercel Marketplace, AWS Mumbai (ap-south-1); Drizzle ORM; `pg` pool | System of record: relations with foreign keys, tenant isolation by row-level security | Store recordings or files |
 | Files | Vercel Blob or Cloudflare R2 (private) | Recordings, CSV uploads, error reports | Serve public URLs |
 | Backup store | Separate R2 account + bucket, versioning + object lock | Per-tenant encrypted snapshots | Be writable by the app's normal key |
 | Auth | Auth.js: Google + email OTP, optional TOTP | Sessions, roles, 2FA | Store plain tokens |
 | Telephony provider | CallerDesk (MyOperator / Exotel later), adapter layer | Phone lines, DIDs, IVR, inbound routing, bridging, recording; click-to-call API + call webhooks | Carry voice through our servers; be reached by SIP |
 | Messaging providers | Interakt, Brevo, Resend (adapter layer) | WhatsApp, email | Be called outside an adapter |
+| Workforce provider | Jibble API (adapter `lib/providers/workforce/jibble.ts`, T2.18) | Employees, clock-in/out, breaks, timesheets, leave, holidays, schedules | Be polled more than every 5 min; hold the only copy of attendance the CRM reports on |
 
 ### 2.1 Telephony model: API click-to-call, no SIP
 
@@ -148,9 +149,14 @@ Optional routing lookup (phase 2, provider permitting): provider asks `POST /api
 
 ## 4. Scheduled jobs (Vercel Cron → QStash)
 
+**Queue safety net (2026-10-05, `lib/queue/health.ts`):** any refused QStash publish (free quota used up, paid plan lapsed, outage) marks the queue *degraded* for 30 min (renewed while failures last, cleared by the next good publish) and alerts every Super Admin once (notification + banner). While degraded: webhooks are still stored and answered 200, and the stuck-webhook sweep processes them inline every tick; new leads are assigned inline; `QUEUE_FANOUT` is ignored; recording copies wait for the sync. Because the QStash schedule itself stops, signed-in page views run the tick in the background (`after`, at most once per 4 min across instances) and the daily Vercel Crons run jobs directly. Nothing is lost — only slower.
+
+**Scale rules for every scheduled job (code review 2026-10-05, 200–300 clients):** everything runs inside ONE 5-minute `tick` (288 QStash messages/day); the tick stops starting work at 45 s so the 60 s function always returns 200 (a killed tick is retried up to 5× by QStash); cross-client scans cap rows per client so one client's backlog can't starve the rest; per-row errors are logged and retried next tick, never thrown out of the loop; deletes run in chunks. Per-client fan-out (one message per client per run) is switched on with `QUEUE_FANOUT=1` once QStash is on a paid plan — no code change.
+
 | Job | Schedule (tenant TZ) | Replaces in crmv7 | What it does |
 | --- | --- | --- | --- |
-| Callback reminders | every 5 min | `processCallbackReminders` (hourly) | Notify 15 min before; mark missed; escalate after 30 min |
+| Callback reminders | every 5 min | `processCallbackReminders` (hourly) | Notify 15 min before; mark missed; escalate after 30 min; SLA alert once per lead (`sla_alerted_at`). ≤ 50 rows per client per scan, each row isolated, stops at the tick deadline |
+| Calls sync | every 5 min (inline) / 15 min (fan-out) | — | Inline (free QStash): clients in turn from a Redis cursor within the tick's 45 s budget; settled report rows skipped with one lookup. `QUEUE_FANOUT=1` (paid QStash): one `sync-calls-tenant` job per client |
 | Assignment sweeper | every 5 min | `runControlAutoAssign` | Assign leads left unassigned |
 | Stuck-call sweeper | every 5 min | — | Mark `initiated` calls with no webhook after 10 min as `unknown`; release `call:active` locks; alert if a provider stops sending webhooks |
 | Outbox relay | every 1 min | — | Publish unpublished events |
@@ -164,6 +170,8 @@ Optional routing lookup (phase 2, provider permitting): provider asks `POST /api
 | Manager digest | 09:00 | `runNotifications` | Hot leads, follow-ups due, disposition counts |
 | Agent weekly report | Mon 08:00 | `sendAllUserReports` | Per-agent summary |
 | Open-leads recount | 02:30 | — | `recount-open-leads`: fix `users.open_leads` drift |
+| Jibble attendance poll | every 5 min (on the existing sweep) | — | T2.20: time entries since the last cursor + live totals → `attendance_events`, Redis presence kept 10 min (must outlive the poll); stale/missing presence = "unknown", and attendance-aware assignment (T2.22) then ignores attendance rather than assigning nobody. Inline mode: clients in turn within the tick budget (like call sync); Jibble has no webhooks |
+| Jibble people + leave sync | 03:15 daily | — | T2.19/T2.25: People ↔ users by email, leave + holidays for the next 30 days |
 
 ## 5. Multi-tenancy
 

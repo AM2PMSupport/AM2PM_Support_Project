@@ -103,6 +103,20 @@ describe("REST v1 with API keys", () => {
     expect((await bad.json()).error.code).toBe("invalid_input");
   });
 
+  it("limits a whole workspace across all its keys, without touching other workspaces", async () => {
+    const { TENANT_RATE_PER_MIN } = await import("@/lib/api/context");
+    const bucket = `t:${admin.tenantId}:rl:tenant:${Math.floor(Date.now() / 60_000)}`;
+    r.store.set(bucket, TENANT_RATE_PER_MIN); // this workspace already used its minute
+    try {
+      const res = await me.GET(req("/api/v1/me", writeKey), params({}));
+      expect(res.status).toBe(429);
+      expect((await res.json()).error.code).toBe("rate_limited");
+      expect((await me.GET(req("/api/v1/me", otherKey), params({}))).status).toBe(200); // other client unaffected
+    } finally {
+      r.store.delete(bucket);
+    }
+  });
+
   it("revoked keys stop working immediately", async () => {
     const k = await createApiKey(admin, { name: "Temp", scope: "read" });
     expect((await me.GET(req("/api/v1/me", k.key), params({}))).status).toBe(200);

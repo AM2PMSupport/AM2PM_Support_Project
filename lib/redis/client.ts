@@ -25,6 +25,12 @@ export const keys = {
   /** Held while an agent has a live call; blocks a second click-to-call. */
   callActive: (tenantId: string, userId: string) => `t:${tenantId}:call:active:${userId}`,
   callsSync: (tenantId: string) => `t:${tenantId}:calls:last_sync`,
+  /** Platform: set while QStash publishes fail (lib/queue/health.ts). */
+  queueDegraded: () => `platform:queue:degraded`,
+  /** Platform: one traffic-driven fallback tick at a time (lib/queue/fallback-tick.ts). */
+  fallbackTickLock: () => `platform:queue:fallback_tick`,
+  /** Platform: last tenant the inline call sync reached (round-robin across ticks). */
+  callsSyncCursor: () => `platform:calls:sync_cursor`,
   /** Agent presence: available | on_call | wrap_up | offline. */
   presence: (tenantId: string, userId: string) => `t:${tenantId}:presence:${userId}`,
   /** Cached eligible agents for a process (30 s). */

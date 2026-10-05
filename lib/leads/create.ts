@@ -20,6 +20,8 @@ import { withTenant, type Tx } from "@/lib/db/tenant";
 import { publishOutboxSafely, writeOutbox } from "@/lib/events/outbox";
 import type { NormalisedLead } from "@/lib/leads/normalise";
 import { enqueue } from "@/lib/queue/qstash";
+import { assignLead } from "@/lib/assignment/assign";
+import { log } from "@/lib/log";
 import { notify } from "@/lib/notifications";
 import type { TenantContext } from "@/lib/tenancy/context";
 
@@ -124,7 +126,12 @@ export async function createOrMergeLead(
   if (result.outcome === "created") {
     await publishOutboxSafely(ctx, [result.outboxId]);
     if (opts.queueAssign !== false) {
-      await enqueue("assign-lead", { tenantId: ctx.tenantId, leadId: result.leadId }, { deduplicationId: `assign:${result.leadId}` });
+      try {
+        await enqueue("assign-lead", { tenantId: ctx.tenantId, leadId: result.leadId }, { deduplicationId: `assign:${result.leadId}` });
+      } catch {
+        // Queue refused (lib/queue/health.ts): assign right here — assignment is DB-only.
+        await assignLead(ctx, result.leadId).catch((err) => log.warn("inline assign failed; the sweep retries", { tenant: ctx.tenantSlug, err }));
+      }
     }
   }
   return { outcome: result.outcome, leadId: result.leadId };

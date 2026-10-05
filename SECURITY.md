@@ -32,7 +32,7 @@ How the AM2PM CRM protects client data, what is already enforced in code, and wh
 | Agent places calls for leads that are not theirs / to DNC contacts | Click-to-call checks lead ownership (agent role), contact DNC, and one live call per agent | **Enforced** (full scope resolver is T1.14) |
 | Unauthenticated access to screens and APIs | Email + password sign-in → signed HttpOnly session cookie (HMAC-SHA256 with `AUTH_SECRET`, 12 h, `Secure`, `SameSite=Lax`); `(app)` layout redirects to `/login`; `requireSession()` on APIs | **Enforced** |
 | Password theft from the database | scrypt (N=16384, r=8, p=1, 16-byte salt) per password; only hashes stored; constant-time compare | **Enforced** |
-| Password guessing / account enumeration | 5 failures per email and 30 per IP per 15 min (Redis) → 429; same error for unknown email and wrong password; dummy hash on unknown emails | **Enforced** |
+| Password guessing / account enumeration | 5 failures per email and 300 per IP per 15 min (Redis; high per-IP ceiling because a whole office shares one IP) → 429; same error for unknown email and wrong password; dummy hash on unknown emails | **Enforced** |
 | Credential stuffing beyond the login throttle | Optional TOTP 2FA, IP allowlist for agents, Google sign-in | **Planned** (T3.10, T3.12) |
 | Webhook floods | Vercel Firewall rate limits on `/api/hooks/*` (e.g. 300/min per source) | **Planned** (T3.12) |
 | Recording links shared publicly | Short-lived signed URLs; every play audit-logged | **Planned** (T1.39) |

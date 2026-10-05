@@ -2,8 +2,11 @@
  * POST /api/auth/login — email + password sign-in.
  *
  * - Body: JSON { email, password } (validated with Zod).
- * - Throttle: 5 failed attempts per email per 15 min, and 30 per IP, counted
- *   in Redis; over the limit → 429 even for a correct password.
+ * - Throttle: 5 failed attempts per email per 15 min, and 300 per IP, counted
+ *   in Redis; over the limit → 429 even for a correct password. The per-IP
+ *   ceiling is high on purpose: a whole call-centre floor (500+ agents) shares
+ *   one office IP, and 30 typos at shift start used to lock everyone out
+ *   (code review 2026-10-05). The per-email limit is the real guard.
  * - Same generic error for unknown email, wrong password or inactive user
  *   (no account enumeration). Password checked in constant time.
  * - Success: signed HttpOnly session cookie (12 h), SameSite=Lax, Secure in
@@ -23,7 +26,7 @@ import { log } from "@/lib/log";
 const Body = z.object({ email: z.email().max(254), password: z.string().min(1).max(200) });
 const WINDOW_SECONDS = 15 * 60;
 const MAX_PER_EMAIL = 5;
-const MAX_PER_IP = 30;
+const MAX_PER_IP = 300;
 // Burn the same time on unknown emails as on real ones (no timing oracle).
 const DUMMY_HASH = "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 

@@ -227,7 +227,7 @@ returning id;
 
 ## 4. Auto-assignment
 
-**Eligibility (in order):** status active → mapped in `user_processes` (SQL join) → `is_available` → inside working hours (tenant TZ) → `openLeads < maxOpenLeads` → under today's quota (Number) → skills match (Skill). Eligible list cached 30 s in Redis per process.
+**Eligibility (in order):** status active → mapped in `user_processes` (SQL join) → `is_available` → clocked in and not on break / leave in Jibble (T2.22, per-process toggle, off by default) → inside working hours (tenant TZ) → `openLeads < maxOpenLeads` → under today's quota (Number) → skills match (Skill). Eligible list cached 30 s in Redis per process.
 
 | Method | Pick |
 | --- | --- |
@@ -451,3 +451,23 @@ Screens: `/login`, `/console`, `/leads`, `/dashboard` (Floor), `/admin` (Setup) 
 | Opt-in column / Require Opt-In | `contacts.consent` |
 | Report builders (`rpt*`) | `daily_stats` + dashboards |
 | Time triggers | Vercel Cron (ARCHITECTURE §4) |
+
+## 11. Workforce tracking (Jibble, planned T2.18–T2.29)
+
+Owner request 2026-10-05 (MEMORIE.md). Jibble stays the place people clock in; the CRM reads it and joins it with call data.
+
+**Jibble API facts** (docs.api.jibble.io, read 2026-10-05): OAuth2 client credentials at `identity.prod.jibble.io/connect/token` (token acts as the key's creator — use an Owner/Admin key); OData REST on `workspace.prod.jibble.io` (People, Groups, Positions, Locations + geofence, Schedules, Activities, Projects, Clients, Calendars, TimeOffPolicies), `time-tracking.prod.jibble.io` (TimeEntries In/Out with time, belongsToDate, project, activity, location, coordinates, device; GetCurrentTotalsForScope; People latest entry; Screenshots; TimeOffIntervals; LeaveBalances), `time-attendance.prod.jibble.io` (Timesheets, TimesheetsSummary, PayPeriodSummary/Details, TrackedTimeReport, attendance export). `Prefer: respond-async` for large collections. **No webhooks**; rate limits unpublished (export concurrency → 429).
+
+**Data (planned):**
+
+| Table | Key columns | Notes |
+| --- | --- | --- |
+| `workforce_integrations` | tenantId (the AM2PM platform workspace), credentialsEnc, lastCursor, lastSyncAt | one Jibble org; secret envelope-encrypted, never returned |
+| `employee_links` | accountId, jibblePersonId, code, group, position, managerIds, status | email match; unmatched rows listed for manual link |
+| `attendance_events` | jibbleEntryId (unique), accountId, type In/Out/Break, at, belongsToDate, locationId, outsideGeofence | `ON CONFLICT DO NOTHING` on jibbleEntryId (polls overlap) |
+| `attendance_days` | accountId, date, firstIn, lastOut, workedSec, breakSec, lateMin | rollup joined with `daily_stats` for the agent sheet |
+
+**Rules:** only through the adapter (RULE §10); poll ≤ every 5 min on the existing sweep; presence in Redis lives 10 min (longer than the poll) and stale presence counts as "unknown", so attendance-aware assignment falls back to ignoring attendance instead of assigning nobody; one person = one account across workspaces, so attendance attaches to `accounts`, and each workspace sees only its own members' rows; screenshots and coordinates are shown only to HR / Auditor / Admin and are off by default; CRM → Jibble writes (T2.29) only when the opt-in is on.
+
+**Screens:** Floor gets an attendance column and mismatch alerts (T2.20–T2.21); Reports → Agent day / Productivity (T2.23–T2.24); HR → Employees and leave (T1.49, T2.25); Accounts → Billable hours (T2.27); Auditor → Attendance audit (T2.28).
+

@@ -11,6 +11,7 @@
 import { Client, Receiver } from "@upstash/qstash";
 import { appEnv, qstashEnv } from "@/lib/config/env";
 import type { JobName, JobPayloads } from "@/lib/queue/jobs";
+import { markQueueFailure, markQueueOk } from "@/lib/queue/health";
 
 let client: Client | undefined;
 let receiver: Receiver | undefined;
@@ -28,15 +29,26 @@ export interface EnqueueOptions {
   retries?: number;
 }
 
+/**
+ * Publishes a job. A failure (quota, billing, outage) is recorded by
+ * lib/queue/health.ts — which switches the app to its fallback paths — and
+ * then re-thrown so the caller can fall back too.
+ */
 export async function enqueue<J extends JobName>(job: J, payload: JobPayloads[J], opts: EnqueueOptions = {}) {
-  const res = await qstash().publishJSON({
-    url: `${appEnv().APP_URL}/api/jobs/${job}`,
-    body: payload,
-    retries: opts.retries ?? 5,
-    delay: opts.delaySeconds,
-    deduplicationId: dedupeId(opts.deduplicationId),
-  });
-  return res.messageId;
+  try {
+    const res = await qstash().publishJSON({
+      url: `${appEnv().APP_URL}/api/jobs/${job}`,
+      body: payload,
+      retries: opts.retries ?? 5,
+      delay: opts.delaySeconds,
+      deduplicationId: dedupeId(opts.deduplicationId),
+    });
+    await markQueueOk();
+    return res.messageId;
+  } catch (err) {
+    await markQueueFailure(err);
+    throw err;
+  }
 }
 
 /** QStash returns 400 "DeduplicationId cannot contain ':'" — callers use "kind:id" freely, so normalise here. */
