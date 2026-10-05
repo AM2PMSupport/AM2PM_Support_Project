@@ -9,12 +9,7 @@ import { v1 } from "@/lib/api/v1";
 import { exportLeads, LeadQuery } from "@/lib/leads/list";
 import { withTenant } from "@/lib/db/tenant";
 import { writeAudit } from "@/lib/audit";
-
-const cell = (v: unknown) => {
-  const s = v === null || v === undefined ? "" : String(v);
-  // Quote, and neutralise spreadsheet formulas (CSV injection).
-  return `"${(/^[=+\-@]/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`;
-};
+import { csvResponse, toCsv } from "@/lib/http/csv";
 
 export const GET = v1(async (req, ctx) => {
   requirePermission(ctx, "leads", "X");
@@ -23,12 +18,6 @@ export const GET = v1(async (req, ctx) => {
   const rows = await exportLeads(ctx, params);
   await withTenant(ctx, (tx) => writeAudit(tx, ctx, { action: "leads.exported", entity: "lead", entityId: ctx.actor.userId, after: { rows: rows.length, filter: params } }));
   const head = ["Name", "Phone", "Email", "Process", "Source", "Campaign", "Stage", "Status", "Owner", "Last outcome", "Attempts", "Next callback", "Created"];
-  const lines = rows.map((r) => [r.name, r.phone, r.email, r.processName, r.source, r.campaign, r.stage, r.status, r.owner, r.lastDisposition, r.attempts, r.nextCallbackAt, r.createdAt].map(cell).join(","));
-  return new Response([head.join(","), ...lines].join("\r\n"), {
-    headers: {
-      "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="leads-${ctx.tenantSlug}-${new Date().toISOString().slice(0, 10)}.csv"`,
-      "cache-control": "no-store",
-    },
-  });
+  const body = toCsv(head, rows.map((r) => [r.name, r.phone, r.email, r.processName, r.source, r.campaign, r.stage, r.status, r.owner, r.lastDisposition, r.attempts, r.nextCallbackAt, r.createdAt]));
+  return csvResponse(body, `leads-${ctx.tenantSlug}-${new Date().toISOString().slice(0, 10)}.csv`);
 });

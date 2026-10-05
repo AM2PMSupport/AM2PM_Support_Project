@@ -1,0 +1,2 @@
+CREATE INDEX "leads_created" ON "leads" USING btree ("tenant_id","created_at");--> statement-breakpoint
+CREATE INDEX "leads_converted" ON "leads" USING btree ("tenant_id","converted_at") WHERE "leads"."converted_at" is not null;

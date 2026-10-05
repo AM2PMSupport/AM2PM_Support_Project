@@ -17,7 +17,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - T2.10: email to admins when a subscription auto-pauses.
 - **QStash dedupe ids (fixed 2026-10-01):** QStash rejects `:` in deduplication ids; `enqueue()` now normalises them. Before this fix, assign-lead / deliver-webhook publishes with `:` ids failed in production (sweepers covered assignment).
 - **QStash schedules (2026-10-01):** frequent jobs run on QStash, not Vercel cron — `npm run setup:schedules` creates `am2pm-callback-reminders` (*/5), `am2pm-sweep-unassigned`, `am2pm-relay-outbox`, `am2pm-sweep-stuck-calls` (*/15) → `/api/jobs/<job>` (signature-checked). ~576 messages/day of the free 1,000.
-- Console, Leads, Floor (real data, `lib/reports/floor.ts`) and Setup are live on Neon. Only Reports/Activity screens still use sample data (Phase 2).
+- Console, Leads, Calls, Floor (`lib/reports/floor.ts`), Reports (`lib/reports/reports.ts`, 2026-10-05) and Setup are live on Neon.
 
 ## Phase 0 — Decisions and setup (before week 1)
 
@@ -132,15 +132,15 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [ ] T2.17 `contacts.consent` UI + DNC enforcement across all senders
 
 ### Workforce — Jibble (owner request 2026-10-05, DESIGN.md §11)
-- [ ] T2.18 Jibble connection: Setup → Integrations, Client ID + Secret encrypted (envelope, like CallerDesk), token cached in Redis, Test connection; Admin / Super Admin only; adapter `lib/providers/workforce/jibble.ts`
-- [ ] T2.19 Employee sync: Jibble People ↔ CRM users by email (daily + on demand); unmatched list with manual link; code, group, position, managers, status → `employee_links` / HR profiles (T1.49)
-- [ ] T2.20 Live attendance on Floor: clocked in / on break / out per agent (GetCurrentTotalsForScope + People latest entry), polled every 5 min on the existing sweep, Redis presence kept 10 min (longer than the poll) and treated as unknown — not "clocked out" — when older than that
-- [ ] T2.21 Mismatch alerts to supervisors: on calls / active in CRM but not clocked in; clocked in but no calls for X min; on Jibble break while taking calls
+- [~] T2.18 Jibble connection: Setup → Integrations, Client ID + Secret encrypted (envelope, like CallerDesk), token cached in Redis, Test connection; Admin / Super Admin only; adapter `lib/providers/workforce/jibble.ts` — Built 2026-10-06: Setup → Attendance (Jibble), Super Admin only (one org for all workspaces), Client ID + Secret encrypted, Test connection per API part, Sync now, Disconnect; adapter `lib/providers/workforce/jibble.ts` (token cached in memory, not Redis). Waiting: live test with the owner's key
+- [~] T2.19 Employee sync: Jibble People ↔ CRM users by email (daily + on demand); unmatched list with manual link; code, group, position, managers, status → `employee_links` / HR profiles (T1.49) — Built: People ↔ CRM logins by email (daily + Sync now), unmatched list with manual link to a member; `workforce_people` (platform table). HR profiles (T1.49) later. Waiting: live test
+- [~] T2.20 Live attendance on Floor: clocked in / on break / out per agent (GetCurrentTotalsForScope + People latest entry), polled every 5 min on the existing sweep, Redis presence kept 10 min (longer than the poll) and treated as unknown — not "clocked out" — when older than that — Built: Attendance → Today (in / break / out / unknown, since, first in, worked, breaks, calls) + Jibble state on Floor; clock events polled every 5 min (tick) and on Attendance/Floor views while crons are daily; presence older than 10 min = unknown. Waiting: live test
+- [~] T2.21 Mismatch alerts to supervisors: on calls / active in CRM but not clocked in; clocked in but no calls for X min; on Jibble break while taking calls — Built: alerts on Attendance → Today (on calls but not clocked in, calls on a break, clocked in with no calls 30+ min). Notifications to supervisors left
 - [ ] T2.22 Attendance-aware assignment: eligibility adds "clocked in and not on break / leave" (per-process toggle, off by default)
-- [ ] T2.23 Daily agent sheet: first in, last out, worked hours, breaks, late vs Jibble schedule + CRM calls, connected, talk time, leads, conversions → talk-time %, calls / worked hour
+- [~] T2.23 Daily agent sheet: first in, last out, worked hours, breaks, late vs Jibble schedule + CRM calls, connected, talk time, leads, conversions → talk-time %, calls / worked hour — Built: Attendance → Day sheet (first in, last out, worked, breaks + dialled, connected, talk, talk %, dials / worked hour) for any period. Late vs Jibble schedule left (schedules not synced yet)
 - [ ] T2.24 Weekly / monthly productivity per team and process with Excel export (TimesheetsSummary, TrackedTimeReport)
-- [ ] T2.25 Leave and holidays: who is on leave today / upcoming; assignment skips them; callbacks booked for an agent on leave flagged for reassignment
-- [ ] T2.26 Holiday calendar (Jibble Calendars) feeds process working hours and SLA clocks
+- [~] T2.25 Leave and holidays: who is on leave today / upcoming; assignment skips them; callbacks booked for an agent on leave flagged for reassignment — Built: leave synced (−7…+30 days), Attendance → Leave & holidays (today, upcoming, pending); assignment skips people on approved leave today (users.on_leave_on). Flagging callbacks of people on leave left
+- [~] T2.26 Holiday calendar (Jibble Calendars) feeds process working hours and SLA clocks — Holidays imported from Jibble and shown on Attendance → Leave & holidays; feeding process working hours / SLA clocks left
 - [ ] T2.27 Billable hours per client for Accounts (T1.50): Jibble projects/clients ↔ CRM workspaces/processes; monthly hours from timesheets
 - [ ] T2.28 Auditor / HR attendance audit: clock-in location + device, outside-geofence flag, timesheet approval status; Jibble screenshots optional (off by default, role-limited)
 - [ ] T2.29 Two-way (opt-in, off by default): CRM Available / Break / Offline → Jibble clock in / break / clock out; verify break handling against the live Jibble setup first
@@ -149,7 +149,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 ## Phase 3 — Reporting and portal (weeks 11–14)
 
 - [ ] T3.1 Daily rollup cron 00:30 (`$merge` into `daily_stats`)
-- [ ] T3.2 Dashboards: funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, week/month/quarter comparisons, day-of-week, stale leads, overdue callbacks
+- [~] T3.2 Dashboards: funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, week/month/quarter comparisons, day-of-week, stale leads, overdue callbacks — Reports module live 2026-10-05 (/reports, live queries on the replica, any range ≤ 92 days): Overview (funnel, trend, stage mix, lost reasons, median first call / time to win), Agents (summary + day sheet: login/logout, first/last call, dialled vs connected per hour, talk, outcomes, conversion, callback compliance), Sources, Calls & callbacks (by hour/weekday/day, results, outcomes, compliance); CSV per table. Left: week/month/quarter comparisons, stale-lead view, daily_stats rollup (T3.1) for large ranges
 - [~] T3.3 CSV export (streamed; large → file + emailed link), masking by role, audit-logged — Leads → Export (current filter, ≤10k rows, masked per role, audited) done 2026-10-02; large export → emailed link left
 - [ ] T3.4 Agent weekly report cron (Mon 08:00)
 - [ ] T3.5 Client portal: processes, masked leads, assigned reports
@@ -166,6 +166,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] T3.16 Create 1–2 Neon read replicas; set `DATABASE_REPLICA_URLS` in Vercel; move dashboard/report/export queries to `withTenantRead()` — replica-1 live, DATABASE_REPLICA_URLS set, Floor/Leads/Calls/reports read via withTenantRead (least connections + failover)
 - [ ] T3.17 DR runbook + drill: restore latest backup into a Neon project in another region, repoint `DATABASE_URL`, measure RTO
 - [ ] T3.18 Uptime monitor on `/api/health` (alert when `ok:false` or any replica out of rotation)
+- [ ] T3.19 Multi-workspace people management (Super Admin): People directory across all workspaces (each login, its workspaces, role per workspace, status; search); add / remove a person to workspaces and set the role per workspace from one place (no switching in); Setup → Team badge "also in N other workspaces"; Add user can pick several workspaces + roles at once. Keeps the SECURITY.md §3.1 rule (cross-workspace linking = Super Admin only)
 - [ ] **Gate 3:** all clients off Sheets; Apps Script read-only
 
 ## Phase 4 — Later (week 15+)

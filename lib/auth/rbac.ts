@@ -41,6 +41,7 @@ export const MODULES = [
   "audit",
   "employees", // HR: employee profiles (screens: TODO(T1.49))
   "billing", // Accounts: invoices and billing (screens: TODO(T1.50))
+  "attendance", // Jibble attendance, leave, day sheet (T2.18–T2.26)
 ] as const;
 export type Module = (typeof MODULES)[number];
 
@@ -65,16 +66,16 @@ export const ROLE_LABEL: Record<Role, string> = {
 };
 
 /** Sidebar modules, in rail order. */
-export const SCREENS = ["console", "leads", "calls", "dashboard", "admin", "soon"] as const;
+export const SCREENS = ["console", "leads", "calls", "dashboard", "reports", "attendance", "admin", "soon"] as const;
 export type Screen = (typeof SCREENS)[number];
 export type ScreenKey = `screen.${Screen}`;
 export const SCREEN_KEYS = SCREENS.map((s) => `screen.${s}` as ScreenKey);
 
 /** The permission area each module needs at least View on (Setup: any SETUP_MODULES; config is the one granted). */
-export const SCREEN_NEEDS: Record<Screen, Module | null> = { console: "leads", leads: "leads", calls: "interactions", dashboard: "reports", admin: "config", soon: null };
+export const SCREEN_NEEDS: Record<Screen, Module | null> = { console: "leads", leads: "leads", calls: "interactions", dashboard: "reports", reports: "reports", attendance: "attendance", admin: "config", soon: null };
 
 /** Modules switched off by default (role can use them, but doesn't see them until a Super Admin turns them on). */
-const SCREEN_OFF: Partial<Record<Role, Screen[]>> = { agent: ["dashboard"], client: ["console", "leads", "calls"] };
+const SCREEN_OFF: Partial<Record<Role, Screen[]>> = { agent: ["dashboard"], client: ["console", "leads", "calls", "reports"] };
 
 /** One role's grants: module → actions string (e.g. "VCE"), plus module-access switches. */
 export type Grants = Partial<Record<Module | ScreenKey, string>>;
@@ -101,6 +102,7 @@ const DEFAULTS: Matrix = {
   audit: { super_admin: "V", admin: "V", auditor: "V" },
   employees: { super_admin: "VCEDAXI", admin: "VCEDXI", hr: "VCEDAXI", project_supervisor: "V", manager: "V" },
   billing: { super_admin: "VCEDAXI", admin: "V", accounts: "VCEDAXI" },
+  attendance: { super_admin: "VX", admin: "VX", project_supervisor: "V", manager: "V", process_coordinator: "V", agent: "V", hr: "VX", auditor: "VX" },
 };
 
 /** Roles whose grants can't be edited (lock-out protection). */
@@ -216,6 +218,30 @@ export function leadScope(role: Role): LeadScope {
   }
 }
 
+/**
+ * Whose attendance a role sees inside its workspace. Separate from leadScope:
+ * HR and Auditor look after everyone's attendance though they see no leads.
+ */
+export function attendanceScope(role: Role): LeadScope {
+  switch (role) {
+    case "super_admin":
+    case "admin":
+    case "hr":
+    case "auditor":
+      return "tenant";
+    case "project_supervisor":
+    case "manager":
+    case "process_coordinator":
+    case "trainer":
+      return "process";
+    case "agent":
+      return "own";
+    case "client":
+    case "accounts":
+      return "none";
+  }
+}
+
 /** Roles that see full phone numbers. Everyone else sees XXXXXX1234 (SECURITY.md §5). */
 export function canSeeFullPhone(role: Role): boolean {
   return role === "super_admin" || role === "admin" || role === "project_supervisor" || role === "manager";
@@ -232,6 +258,9 @@ export function navAvailable(who: Who): Screen[] {
   // Calls log + recordings: anyone who may view interactions (agents: their own calls).
   if (scoped && can(who, "interactions", "V")) items.push("calls");
   if (can(who, "reports", "V")) items.push("dashboard"); // agents: switched off by default (SCREEN_OFF)
+  // Reports: agents see only their own numbers (leadScope "own"); clients start switched off.
+  if (can(who, "reports", "V")) items.push("reports");
+  if (can(who, "attendance", "V")) items.push("attendance"); // whose rows: attendanceScope()
   if (SETUP_MODULES.some((m) => can(who, m, "V"))) items.push("admin");
   items.push("soon"); // showcase on sample data — any role
   return items;
@@ -258,7 +287,7 @@ export function homeFor(who: Who): string {
  * back to home (never an open redirect).
  */
 export function landingAfterSwitch(who: Who, from: string | undefined): string {
-  const m = /^\/(console|leads|calls|dashboard|admin|soon)(?:\/[a-z-]+)?(?:\?(.*))?$/.exec(from ?? "");
+  const m = /^\/(console|leads|calls|dashboard|reports|attendance|admin|soon)(?:\/[a-z-]+)?(?:\?(.*))?$/.exec(from ?? "");
   const page = m?.[1] as ReturnType<typeof navFor>[number] | undefined;
   if (!page || !navFor(who).includes(page)) return homeFor(who);
   const tab = page === "admin" ? new URLSearchParams(m![2] ?? "").get("tab") : null;

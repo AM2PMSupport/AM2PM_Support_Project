@@ -30,35 +30,6 @@ export interface SoonModule {
 
 export const SOON_MODULES: SoonModule[] = [
   {
-    slug: "reports",
-    title: "Reports & analytics",
-    icon: "reports",
-    tagline: "Funnel, leaderboard, sources and callback compliance — daily, weekly, monthly.",
-    plan: "Phase 3 · daily rollups + dashboards",
-    forWho: "Admins, managers, supervisors, clients (their own data)",
-    features: [
-      "Lead funnel by process: new → contacted → interested → won, with drop-off per stage",
-      "Agent leaderboard: calls, connects, talk time, conversions, callback compliance",
-      "Source performance: cost per lead and conversion by Meta, Google, IndiaMART, Justdial, website",
-      "Time to first call and time to convert, per process and per agent",
-      "Scheduled email reports (weekly agent report, monthly client summary) and Excel export",
-    ],
-    preview: {
-      kpis: [
-        { label: "Leads this month", value: "4,812", note: "+12% vs last month" },
-        { label: "Conversion", value: "8.4%", note: "404 won" },
-        { label: "Median first call", value: "3:42", note: "m:ss" },
-        { label: "Callback compliance", value: "91%", note: "on time" },
-      ],
-      table: {
-        title: "Leaderboard · this week",
-        columns: ["Agent", "Calls", "Connected", "Talk time", "Won"],
-        rows: [["Asha R.", "412", "61%", "11h 20m", "18"], ["Vikram S.", "389", "58%", "10h 05m", "15"], ["Neha K.", "355", "63%", "9h 48m", "14"], ["Rahul M.", "331", "55%", "8h 52m", "11"]],
-      },
-      side: { title: "Top sources", items: [{ label: "Meta Ads", value: "41%" }, { label: "Website", value: "22%" }, { label: "IndiaMART", value: "17%" }, { label: "Justdial", value: "12%" }] },
-    },
-  },
-  {
     slug: "campaigns",
     title: "WhatsApp & email campaigns",
     icon: "campaigns",
@@ -113,35 +84,6 @@ export const SOON_MODULES: SoonModule[] = [
         rows: [["Hot lead → manager", "Stage = Hot", "Notify + reassign", "212", "On"], ["Missed callback rescue", "Callback missed", "WhatsApp + new callback", "96", "On"], ["Stale lead recycle", "No activity 3 days", "Reassign", "430", "On"]],
       },
       side: { title: "Last runs", items: [{ label: "Hot lead → manager", value: "2 min ago" }, { label: "Stale lead recycle", value: "6 min ago" }, { label: "Welcome WhatsApp", value: "9 min ago" }] },
-    },
-  },
-  {
-    slug: "attendance",
-    title: "Attendance (Jibble)",
-    icon: "attendance",
-    tagline: "Who is clocked in, on break or away — joined with calls for real productivity.",
-    plan: "Phase 2 · T2.18–T2.29",
-    forWho: "Supervisors, managers, HR, auditors",
-    features: [
-      "Live clocked-in / on break / out next to each agent's CRM status",
-      "Alerts: calling while not clocked in, clocked in but idle, taking calls on a break",
-      "Leads go only to agents who are clocked in (optional per process)",
-      "Daily agent sheet: first in, last out, hours, breaks, lateness + calls and talk time",
-      "Leave and holidays respected by assignment and SLA clocks",
-    ],
-    preview: {
-      kpis: [
-        { label: "Clocked in", value: "48 / 56" },
-        { label: "On break", value: "5" },
-        { label: "Late today", value: "3" },
-        { label: "Talk-time share", value: "62%" },
-      ],
-      table: {
-        title: "Today",
-        columns: ["Agent", "In", "Hours", "Breaks", "Calls / hour"],
-        rows: [["Asha R.", "09:28", "6h 40m", "35m", "11.2"], ["Vikram S.", "09:41", "6h 12m", "50m", "9.8"], ["Neha K.", "10:05 · late", "5h 50m", "30m", "10.4"]],
-      },
-      side: { title: "Alerts", items: [{ label: "On calls, not clocked in", value: "1" }, { label: "Idle 20+ min", value: "2" }, { label: "On leave today", value: "4" }] },
     },
   },
   {

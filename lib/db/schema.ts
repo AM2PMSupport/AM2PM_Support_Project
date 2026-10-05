@@ -17,6 +17,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -180,6 +181,8 @@ export const users = pgTable(
     openLeads: integer("open_leads").notNull().default(0),
     dailyQuota: integer("daily_quota"),
     isAvailable: boolean("is_available").notNull().default(false),
+    /** Tenant-local day (yyyy-mm-dd) this person is on approved leave in Jibble; set by the attendance sync, read by assignment (T2.25). */
+    onLeaveOn: text("on_leave_on"),
     status: text("status").$type<"active" | "inactive" | "locked">().notNull().default("active"),
     /** The person's login (accounts). One membership per workspace. */
     accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
@@ -357,6 +360,9 @@ export const leads = pgTable(
   },
   (t) => [
     index("leads_recycle_bin").on(t.tenantId, t.deletedAt).where(sql`${t.deletedAt} is not null`),
+    // Reports + Floor: leads in / won in a date range (RULE §8: tenant first).
+    index("leads_created").on(t.tenantId, t.createdAt),
+    index("leads_converted").on(t.tenantId, t.convertedAt).where(sql`${t.convertedAt} is not null`),
     // Dedupe: racing imports cannot create two active leads (ON CONFLICT → merge).
     uniqueIndex("leads_dedupe_active").on(t.tenantId, t.processId, t.dedupeKey).where(sql`${t.isActive}`),
     index("leads_owner_callback").on(t.tenantId, t.assignedTo, t.nextCallbackAt),
@@ -779,6 +785,83 @@ export const backupSnapshots = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (t) => [index("backup_snapshots_recent").on(t.tenantId, t.startedAt)],
+);
+
+// ------------------------------------------------------------------ attendance (Jibble, T2.18–T2.26)
+// PLATFORM tables, like `accounts`: one Jibble organisation serves every
+// workspace and a person is one account across workspaces, so these have no
+// tenant_id. The app role has no access (REVOKE in the migration); only
+// lib/platform-admin reads them, always filtered to the current workspace's
+// members (users.tenant_id + users.account_id). DESIGN.md §11.
+
+/** The Jibble connection (one row per provider). Credentials AES-256-GCM, never returned. */
+export const workforceConnections = pgTable("workforce_connections", {
+  provider: text("provider").primaryKey(),
+  credentialsEnc: text("credentials_enc").notNull(),
+  status: text("status").$type<"active" | "error">().notNull().default("active"),
+  /** Time entries are fetched from here (minus an overlap) on each poll. */
+  entriesCursor: timestamp("entries_cursor", { withTimezone: true }),
+  entriesSyncedAt: timestamp("entries_synced_at", { withTimezone: true }),
+  peopleSyncedAt: timestamp("people_synced_at", { withTimezone: true }),
+  leaveSyncedAt: timestamp("leave_synced_at", { withTimezone: true }),
+  /** Last problem per part, e.g. { leave: "HTTP 404" } — shown in Setup. */
+  lastErrors: jsonb("last_errors").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+  updatedBy: uuid("updated_by").references(() => accounts.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
+/** Jibble people, linked to CRM logins by email (or by hand). `state` = latest clock event. */
+export const workforcePeople = pgTable(
+  "workforce_people",
+  {
+    id: uuid("id").primaryKey(), // Jibble person id
+    accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
+    linkedBy: text("linked_by").$type<"email" | "manual">(),
+    email: text("email"),
+    fullName: text("full_name").notNull(),
+    code: text("code"),
+    status: text("status"),
+    state: text("state").$type<"in" | "break" | "out">(),
+    stateAt: timestamp("state_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index("workforce_people_account").on(t.accountId), index("workforce_people_email").on(sql`lower(${t.email})`)],
+);
+
+/** Raw clock events. Polls overlap, so inserts are ON CONFLICT DO NOTHING on the Jibble id. */
+export const workforceEntries = pgTable(
+  "workforce_entries",
+  {
+    id: uuid("id").primaryKey(), // Jibble time entry id
+    personId: uuid("person_id").notNull(),
+    type: text("type").$type<"In" | "Out" | "StartBreak" | string>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    belongsToDate: date("belongs_to_date", { mode: "string" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("workforce_entries_person_day").on(t.personId, t.belongsToDate, t.at), index("workforce_entries_day").on(t.belongsToDate)],
+);
+
+/** Time off (leave) intervals, refreshed for −7 … +30 days on each leave sync. */
+export const workforceLeave = pgTable(
+  "workforce_leave",
+  {
+    id: text("id").primaryKey(), // Jibble id
+    personId: uuid("person_id").notNull(),
+    startDate: date("start_date", { mode: "string" }).notNull(),
+    endDate: date("end_date", { mode: "string" }).notNull(),
+    status: text("status").notNull(),
+    kind: text("kind"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("workforce_leave_person").on(t.personId, t.startDate), index("workforce_leave_dates").on(t.startDate, t.endDate)],
+);
+
+/** Public holidays from the Jibble calendar. */
+export const workforceHolidays = pgTable(
+  "workforce_holidays",
+  { date: date("date", { mode: "string" }).notNull(), name: text("name").notNull() },
+  (t) => [primaryKey({ columns: [t.date, t.name] })],
 );
 
 // ------------------------------------------------------------------ row types

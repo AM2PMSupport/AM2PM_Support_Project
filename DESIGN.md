@@ -346,7 +346,7 @@ Legend: V view · C create · E edit · D delete · A approve · X export · I i
 
 **Editable per workspace** (2026-10-05, MEMORIE.md): the table below is the default. A Super Admin can change any cell for their workspace in Setup → Roles — changes are a draft (unsaved cells ringed) until **Save**, which writes them all in one transaction; **Cancel** drops the draft; **Default** puts every role's module access and permissions back to the defaults (then Save); edits are stored in `role_permissions` (only cells that differ from the default) and applied to every check via the actor's `grants` (lib/auth/grants.ts → lib/auth/rbac.ts `can(who, …)`). Super Admin's column is locked. Data scope below (own / process / tenant) is fixed per role and not editable.
 
-**Module access** (2026-10-05): above the matrix, Setup → Roles has one switch per role × sidebar module (Console, Leads, Calls, Floor, Setup, Coming soon), stored as `role_permissions` rows `screen.<name>` (`V` on, `""` off). Defaults reproduce the old sidebar: on wherever the role's permissions can use the module, except Floor for agents and Console/Leads/Calls for clients. A module shows only when switched on **and** the role's permissions can use it (`navAvailable()` → `navFor()`). Ticking any box (except Super Admin's) works: if the role lacks the permission the module needs (`SCREEN_NEEDS`: Console/Leads → leads, Calls → interactions, Floor → reports, Setup → config), the same save grants View on it. Page guards (`requirePage`) and the post-switch landing use the same list.
+**Module access** (2026-10-05): above the matrix, Setup → Roles has one switch per role × sidebar module (Console, Leads, Calls, Floor, Reports, Attendance, Setup, Coming soon), stored as `role_permissions` rows `screen.<name>` (`V` on, `""` off). Defaults reproduce the old sidebar: on wherever the role's permissions can use the module, except Floor for agents and Console/Leads/Calls for clients. A module shows only when switched on **and** the role's permissions can use it (`navAvailable()` → `navFor()`). Ticking any box (except Super Admin's) works: if the role lacks the permission the module needs (`SCREEN_NEEDS`: Console/Leads → leads, Calls → interactions, Floor / Reports → reports, Attendance → attendance, Setup → config), the same save grants View on it. Page guards (`requirePage`) and the post-switch landing use the same list.
 
 Lead scope for client, trainer, HR and accounts is `process` (the processes they're mapped to): it only matters once a Super Admin grants them lead or call rights.
 
@@ -367,6 +367,7 @@ Reassigning leads (bulk "Assign to…", choosing an owner on Create Lead) = `E` 
 | Audit logs | V | V | – | – | – | – | – | – | V | – |
 | Employees (T1.49) | VCEDAXI | VCEDXI | V | V | – | – | – | VCEDAXI | – | – |
 | Billing (T1.50) | VCEDAXI | V | – | – | – | – | – | – | – | VCEDAXI |
+| Attendance (T2.18–T2.26) | VX | VX | V | V | V | – | V (self) | VX | VX | – |
 
 Trainer: LMS only (phase 4); default Reports V. CSV import = `I` on Leads. HR and Accounts see no leads (scope none); Auditor sees every lead in the workspace read-only (scope tenant, phones masked).
 
@@ -409,7 +410,7 @@ Errors: JSON `{ error: { code, message } }`; list endpoints return `{ items, nex
 | Manager | Leads (Zoho-style, built 2026-10-02) | filter rail (saved filters personal/shared, system filters: my leads, unassigned, not called, callback overdue/today, re-enquired; status, stage, source, owner, process, created — with counts), sort (newest, oldest, name, next callback, last activity), list or board (by stage, drag to move), manage columns + records per page (25/50/100), bulk assign / move stage / delete / restore, row actions Edit + Delete pinned right with Lead name pinned left, table settings (Manage Columns, Reset Column Size, Records Per Page, View Mode wrap/clip, drag-to-resize columns), Prev/Next keyset paging with page x of y, Recycle bin, Edit opens the full-page lead record `/leads/{id}` (2026-10-05: contact, Mobile 2, stage, owner, campaign, every custom field + extra column editable; every system column read-only; timeline + call history with recordings; phone only for roles that see full numbers; read-only without leads E), Create Lead drawer (dedupe-aware), CSV export (X permission) |
 | Everyone with calls | Calls (built 2026-10-03) | call log in scope: when (tenant tz), in/out, lead, number (masked per role), agent, result, duration, talk time, outcome; filters (today/7d/30d/all, direction, result, agent, with recording, name/digits); totals strip; ▶ inline player per call (and in the console timeline); "Sync now" (supervisors+) + automatic 15-min sync from CallerDesk |
 | Manager | Team dashboard | live agents, open/unassigned leads, SLA breaches, reassign |
-| Manager | Reports | funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, period comparisons, CSV export |
+| Everyone with Reports V | Reports (built 2026-10-05, T3.2) | `/reports?tab=overview|agents|sources|calls&period=…&from&to&process` — GET-form filters (Today, Yesterday, 7/30 days, this/last month, custom ≤ 92 days; process), tabs are links. **Overview:** KPIs (leads in, called %, reached %, interested, won, lost, never called, median first call, median time to win), funnel (leads in → assigned → called → reached → interested → won), leads in vs won per day, current stage mix, lost reasons. **Agents:** per-agent summary (days, dialled, connected, connect %, dialled/h and connected/h over the first→last-call span ≥ 1 h a day, avg first/last call, inbound answered/missed, talk, avg talk, interested, callbacks set, not interested, won, conversion of connected, callback compliance) + day sheet (login, first call, last call, logout, span, …). **Sources:** leads, called, reached %, interested, won, conversion, lost, never called, median first call. **Calls & callbacks:** KPIs, calls by hour / weekday / day, how calls ended, outcomes, callback compliance (on time = called 5 min before to 15 min after due; late; not called; overdue now). CSV per table (`/api/v1/reports/export`, Reports X, audited). Scope: workspace / mapped processes / agent's own numbers. Live queries on the replica (`lib/reports/reports.ts`); the daily_stats rollup (T3.1) takes over for long ranges. Login/logout = `auth.login` / `auth.logout` audit rows (recorded from 2026-10-05) |
 | Admin | Setup home (built 2026-10-02) | searchable grid: General (company settings, users, workspaces) · Security (roles & permissions, audit log, login history) · Channels (telephony, lead sources, webhooks) · Customization (processes, outcomes & fields) · Automation (assignment, reminders/SLA) · Data (import, export, remove sample data) · Training (planned). Planned items shown greyed with their phase |
 | Admin | Processes | stages, won stage, dispositions, assignment method + weights + caps + hours, dedupe rule |
 | Admin | Sources | add source, field-map editor, key shown once, health, CSV import with batch report |
@@ -417,7 +418,7 @@ Errors: JSON `{ error: { code, message } }`; list endpoints return `{ items, nex
 | Admin | Telephony | provider credentials, DIDs → process and direction, default outbound DID, webhook URL to paste into the provider, last webhook received, test call |
 | Admin | Webhooks | subscriptions, event picker, secret once, test-send, delivery log, failed events + Replay |
 | Admin | Backups | snapshots, backup now, download (2FA), export CSV, request restore |
-| Everyone | Coming soon (built 2026-10-05) | "Soon" in the rail → `/soon` hub of planned modules (reports, campaigns, workflows, attendance, employees, billing, client portal, training, backups, connectors, AI call quality) → `/soon/{module}` with plan position, audience, features and a preview on fictional sample data. Catalogue in `lib/ui/coming-soon.ts`; reads no tenant data. When a module ships, remove its entry |
+| Everyone | Coming soon (built 2026-10-05) | "Soon" in the rail → `/soon` hub of planned modules (campaigns, workflows, employees, billing, client portal, training, backups, connectors, AI call quality) → `/soon/{module}` with plan position, audience, features and a preview on fictional sample data. Catalogue in `lib/ui/coming-soon.ts`; reads no tenant data. When a module ships, remove its entry |
 | Everyone | 404 (built 2026-10-05) | `app/not-found.tsx`: the AM2PM clock as the "0" in 404, dizzy (cross eyes, wobble, spinning hand, sweat drop; still under reduced motion), "This page clocked out.", Take me home. Shown for unknown URLs AND for modules / Setup tabs the role can't open (SECURITY.md §3.3) |
 | Super Admin | Tenants, restore approvals, platform health | |
 | Client portal | Processes, leads (masked), assigned reports, backups (if allowed) | |
@@ -436,7 +437,7 @@ UI stack: Next.js App Router, React Server Components, Tailwind CSS + shadcn/ui.
 | Charts | Hand-drawn SVG, direct labels, no chart library |
 | Code | `app/globals.css` tokens (Tailwind v4 `@theme`), `components/`, sample data in `lib/ui/sample-data.ts` (shapes mirror the DB) |
 
-Screens: `/login`, `/console`, `/leads`, `/dashboard` (Floor), `/admin` (Setup) — all on live data since 2026-10-02. `/soon` (Coming soon) is sample data by design.
+Screens: `/login`, `/console`, `/leads`, `/dashboard` (Floor), `/reports` (Reports), `/admin` (Setup) — all on live data since 2026-10-02. `/soon` (Coming soon) is sample data by design.
 
 ## 10. crmv7 → new system mapping
 
@@ -458,22 +459,26 @@ Screens: `/login`, `/console`, `/leads`, `/dashboard` (Floor), `/admin` (Setup) 
 | Report builders (`rpt*`) | `daily_stats` + dashboards |
 | Time triggers | Vercel Cron (ARCHITECTURE §4) |
 
-## 11. Workforce tracking (Jibble, planned T2.18–T2.29)
+## 11. Workforce tracking (Jibble, T2.18–T2.29 — first version built 2026-10-06)
 
 Owner request 2026-10-05 (MEMORIE.md). Jibble stays the place people clock in; the CRM reads it and joins it with call data.
 
 **Jibble API facts** (docs.api.jibble.io, read 2026-10-05): OAuth2 client credentials at `identity.prod.jibble.io/connect/token` (token acts as the key's creator — use an Owner/Admin key); OData REST on `workspace.prod.jibble.io` (People, Groups, Positions, Locations + geofence, Schedules, Activities, Projects, Clients, Calendars, TimeOffPolicies), `time-tracking.prod.jibble.io` (TimeEntries In/Out with time, belongsToDate, project, activity, location, coordinates, device; GetCurrentTotalsForScope; People latest entry; Screenshots; TimeOffIntervals; LeaveBalances), `time-attendance.prod.jibble.io` (Timesheets, TimesheetsSummary, PayPeriodSummary/Details, TrackedTimeReport, attendance export). `Prefer: respond-async` for large collections. **No webhooks**; rate limits unpublished (export concurrency → 429).
 
-**Data (planned):**
+**Data (built 2026-10-06, migration 0016)** — PLATFORM tables like `accounts`: no tenant_id, app role REVOKEd, only `lib/platform-admin/attendance.ts` reads them, always for account ids the caller got from its own workspace (RLS):
 
 | Table | Key columns | Notes |
 | --- | --- | --- |
-| `workforce_integrations` | tenantId (the AM2PM platform workspace), credentialsEnc, lastCursor, lastSyncAt | one Jibble org; secret envelope-encrypted, never returned |
-| `employee_links` | accountId, jibblePersonId, code, group, position, managerIds, status | email match; unmatched rows listed for manual link |
-| `attendance_events` | jibbleEntryId (unique), accountId, type In/Out/Break, at, belongsToDate, locationId, outsideGeofence | `ON CONFLICT DO NOTHING` on jibbleEntryId (polls overlap) |
-| `attendance_days` | accountId, date, firstIn, lastOut, workedSec, breakSec, lateMin | rollup joined with `daily_stats` for the agent sheet |
+| `workforce_connections` | provider (pk), credentialsEnc, entriesCursor, entries/people/leaveSyncedAt, lastErrors | one Jibble org for every workspace; Super Admin only; secret AES-256-GCM, never returned |
+| `workforce_people` | id (Jibble person), accountId, linkedBy email/manual, email, fullName, code, status, state in/break/out, stateAt | linked to `accounts` by lower(email); hand links kept on re-sync |
+| `workforce_entries` | id (Jibble entry, pk), personId, type In/Out/StartBreak, at, belongsToDate | `ON CONFLICT DO NOTHING` (polls overlap 10 min) |
+| `workforce_leave` | id, personId, startDate, endDate, status, kind | −7 … +30 days, rows Jibble no longer returns are dropped |
+| `workforce_holidays` | date, name | to year end |
+| `users.on_leave_on` | tenant-local yyyy-mm-dd | stamped by the sync for approved leave today; `eligibleUsers` skips it (RULE §4.3) |
+
+Day maths (first in, last out, worked = In→StartBreak/Out, break = StartBreak→In, presence, alerts) are pure in `lib/attendance/day.ts`. Not built yet: `attendance_days` rollup (computed on read), schedules / late minutes, location / geofence, screenshots, T2.22 clocked-in-aware assignment, T2.24 productivity export, T2.27–T2.29.
 
 **Rules:** only through the adapter (RULE §10); poll ≤ every 5 min on the existing sweep; presence in Redis lives 10 min (longer than the poll) and stale presence counts as "unknown", so attendance-aware assignment falls back to ignoring attendance instead of assigning nobody; one person = one account across workspaces, so attendance attaches to `accounts`, and each workspace sees only its own members' rows; screenshots and coordinates are shown only to HR / Auditor / Admin and are off by default; CRM → Jibble writes (T2.29) only when the opt-in is on.
 
-**Screens:** Floor gets an attendance column and mismatch alerts (T2.20–T2.21); Reports → Agent day / Productivity (T2.23–T2.24); HR → Employees and leave (T1.49, T2.25); Accounts → Billable hours (T2.27); Auditor → Attendance audit (T2.28).
+**Screens (built):** sidebar **Attendance** (`/attendance?tab=today|days|leave`): Today — presence, since, first in, worked, breaks, calls, connected, talk, last call, alerts; Day sheet — any period ≤ 92 days, worked vs calls (talk %, dials per worked hour); Leave & holidays. Floor shows each agent's Jibble state. Setup → **Attendance (Jibble)** (Super Admin): key, Test connection (per API part), Sync now, last sync + errors per part, unmatched people with link-to-member. Who appears: `attendanceScope` — Super Admin/Admin/HR/Auditor the workspace, Supervisor/Manager/Coordinator/Trainer mapped processes, Agent self. **Planned:** HR → Employees (T1.49), Accounts → Billable hours (T2.27), Auditor → Attendance audit (T2.28).
 

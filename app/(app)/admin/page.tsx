@@ -39,6 +39,9 @@ import { listSources } from "@/lib/admin/sources";
 import { listImports } from "@/lib/imports/run";
 import { ImportsPanel, type ImportRow } from "@/components/admin/imports-panel";
 import { getTelephony } from "@/lib/admin/telephony";
+import { jibbleStatus } from "@/lib/platform-admin/attendance";
+import { memberOptions } from "@/lib/attendance/view";
+import { JibblePanel } from "@/components/admin/jibble-panel";
 import { webhookSubscriptions } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 
@@ -51,6 +54,7 @@ const TABS = [
   { id: "outcomes", label: "Outcomes & fields" },
   { id: "sources", label: "Lead sources" },
   { id: "telephony", label: "Telephony" },
+  { id: "attendance", label: "Attendance (Jibble)" },
   { id: "webhooks", label: "Webhooks" },
   { id: "api", label: "API keys" },
   { id: "roles", label: "Roles" },
@@ -88,6 +92,7 @@ function setupGroups(who: Who): SetupGroup[] {
       icon: "channels",
       items: [
         can(who, "config", "V") && { label: "Telephony (CallerDesk)", href: t("telephony"), hint: "Click-to-call, DIDs, call webhooks" },
+        role === "super_admin" && { label: "Attendance (Jibble)", href: t("attendance"), hint: "Clock-ins, breaks, leave, holidays from Jibble" },
         can(who, "import_sources", "V") && { label: "Lead sources & webforms", href: t("sources"), hint: "Meta, website, IndiaMART, Justdial, API" },
         can(who, "webhooks", "V") && { label: "Outbound webhooks", href: t("webhooks"), hint: "Send converted leads to client CRMs" },
         can(who, "integrations", "C") && { label: "API keys (REST & GraphQL)", href: t("api"), hint: "Keys for integrations; acts as you, read or write" },
@@ -164,6 +169,7 @@ function tabVisible(id: TabId, who: Who): boolean {
     case "audit":
       return can(who, "audit", "V");
     case "workspaces":
+    case "attendance": // one Jibble org for every workspace
       return who.role === "super_admin";
   }
 }
@@ -296,6 +302,8 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
     ) : (
       <NoAccess />
     );
+  } else if (tab === "attendance") {
+    body = <JibblePanel data={await jibbleStatus()} members={await memberOptions(ctx)} timeZone={ctx.timezone} />;
   } else if (tab === "telephony") {
     body = telephony ? <TelephonyPanel data={telephony} processes={procOptions} canEdit={can(ctx.actor, "integrations", "C")} /> : <NoAccess />;
   } else if (tab === "workspaces") {

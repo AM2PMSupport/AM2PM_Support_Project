@@ -11,16 +11,15 @@ import { AutoRefresh } from "@/components/dashboard/auto-refresh";
 import { Topbar } from "@/components/shell/topbar";
 import { Avatar, SectionTitle } from "@/components/ui/primitives";
 import { getFloor } from "@/lib/reports/floor";
-import { STATUS_META } from "@/lib/ui/status";
+import { after } from "next/server";
+import { syncAttendanceIfStale } from "@/lib/platform-admin/attendance";
+import { SOURCE_LABEL, STATUS_META } from "@/lib/ui/status";
 import type { AgentStatus } from "@/lib/ui/sample-data";
 
 export const metadata: Metadata = { title: "Floor" };
 export const dynamic = "force-dynamic";
 
-const SOURCE: Record<string, string> = {
-  meta_ads: "Meta Ads", web_form: "Website", indiamart: "IndiaMART", justdial: "Justdial", inbound_call: "Inbound call",
-  csv: "CSV import", google_ads: "Google Ads", sheet: "Google Sheet", api: "API", manual: "Manual",
-};
+const JIBBLE = { in: "in", break: "on break", out: "not clocked in", unknown: "unknown" } as const;
 const ORDER: AgentStatus[] = ["on_call", "wrap_up", "available", "break", "offline"];
 
 /** Change vs yesterday at the same time of day. */
@@ -41,6 +40,7 @@ const initials = (name: string) => name.split(/\s+/).map((w) => w[0]).join("").s
 
 export default async function FloorPage() {
   const ctx = await requirePage("dashboard");
+  after(() => syncAttendanceIfStale().catch(() => undefined)); // Jibble has no webhooks; poll on views while crons are daily
   const f = await getFloor(ctx);
   const k = f.kpis;
   const connectRate = k.attempted ? k.connected / k.attempted : null;
@@ -121,6 +121,7 @@ export default async function FloorPage() {
                       <div className="flex items-center gap-1.5 text-[11.5px] text-ink-3">
                         <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
                         {meta.label}
+                        {a.jibble && <span className="text-ink-4">· Jibble: {JIBBLE[a.jibble]}</span>}
                       </div>
                     </div>
                     <div className="text-right font-mono text-[11.5px] leading-tight tnum text-ink-2">
@@ -158,7 +159,7 @@ export default async function FloorPage() {
               <tbody>
                 {f.sources.map((s) => (
                   <tr key={s.source} className="border-b border-rule last:border-b-0">
-                    <td className="px-5 py-2.5 font-medium">{SOURCE[s.source] ?? s.source}</td>
+                    <td className="px-5 py-2.5 font-medium">{SOURCE_LABEL[s.source] ?? s.source}</td>
                     <td className="px-3 py-2.5 text-right font-mono tnum">{s.leads}</td>
                     <td className="px-3 py-2.5">
                       <span className="flex items-center gap-2">

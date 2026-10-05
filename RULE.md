@@ -47,7 +47,7 @@ These rules apply to every change. A PR that breaks one is not merged. Why each 
 
 1. The pick is atomic, in one transaction: lock the lead and the process's `assignment_state` (`FOR UPDATE`), then `UPDATE users SET open_leads = open_leads + 1 WHERE id = $1 AND open_leads < max_open_leads RETURNING`; no row = try the next candidate, up to 3.
 2. Percentage/Ratio must interleave (smooth weighted round-robin). Contiguous blocks are a bug.
-3. Eligibility order is fixed: active → mapped → available → working hours → capacity → quota → skills.
+3. Eligibility order is fixed: active → mapped → available (and not on approved Jibble leave today, T2.25) → working hours → capacity → quota → skills.
 4. `open_leads` decrements on won, lost, DNC and reassignment; the nightly `recount-open-leads` job corrects drift.
 
 ## 5. Security and privacy

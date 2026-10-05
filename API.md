@@ -173,6 +173,10 @@ Session cookie or API key (`read`). Returns leads in the caller's scope (agent: 
 
 Session cookie or API key (`read`). Same query params (no `cursor`). Needs the leads **X** permission. Up to 10,000 rows, phones masked per role, formula-looking cells neutralised (CSV injection), audited as `leads.exported`.
 
+### 3.8a `GET /api/v1/reports/export` — report as CSV
+
+Session cookie or API key (`read`). Needs the reports **X** permission. Params: `report` = `overview` (leads in / won per day) · `agents` (per-agent summary) · `agent_days` (day sheet: login, first/last call, logout, dialled, connected, per hour, talk, won, callbacks) · `sources` · `calls` (per day); `period` = `today|yesterday|7d|30d|this_month|last_month|custom` with `from`/`to` (yyyy-mm-dd, tenant-local, max 92 days); optional `process` (one of yours, else `404`). Same scope as the Reports screen (agents: their own numbers). Formula-looking cells neutralised; audited as `report.exported`. Bad `report` → `400 invalid_query`.
+
 ### 3.9 `GET /api/v1/calls/{id}/recording` — play a call recording
 
 Session cookie or API key (`read`) + `interactions` V, and the call must be in the viewer's scope (agents: their own calls; supervisors/managers/coordinators/clients: their processes; admins: workspace). Streams our private Blob copy (`recordings/<tenant>/<yyyy>/<mm>/<id>.<ext>`); until the copy exists, proxies CallerDesk's file (https on `*.callerdesk.io` only) with `Range` passthrough. The provider URL never reaches the browser. `cache-control: private, no-store`. Starting playback is audited (`recording.played`). `404` when there's no recording or the call isn't yours.

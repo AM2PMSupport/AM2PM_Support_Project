@@ -14,8 +14,8 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | --- | --- | --- | --- | --- | --- |
 | [Phase 0](#phase-0--decisions-and-setup) | Decisions and setup | 3 | 2 | 5 | 40% |
 | [Phase 1](#phase-1--core-crm-weeks-16) | Core CRM (weeks 1–6) | 40 | 9 | 8 | 78% |
-| [Phase 2](#phase-2--automation-weeks-710) | Automation (weeks 7–10) | 1 | 2 | 27 | 7% |
-| [Phase 3](#phase-3--reporting-client-portal-backups-weeks-1114) | Reporting, client portal, backups (weeks 11–14) | 2 | 1 | 15 | 14% |
+| [Phase 2](#phase-2--automation-weeks-710) | Automation (weeks 7–10) | 1 | 9 | 20 | 18% |
+| [Phase 3](#phase-3--reporting-client-portal-backups-weeks-1114) | Reporting, client portal, backups (weeks 11–14) | 2 | 2 | 15 | 16% |
 | [Phase 4](#phase-4--later-week-15) | Later (week 15+) | 0 | 0 | 8 | 0% |
 
 ## Next up (in order)
@@ -163,15 +163,15 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | T2.15 | ⬜ To do | Brevo adapter: campaigns to consented contacts, status webhook | — |
 | T2.16 | ⬜ To do | Resend adapter: broadcasts + transactional, unsubscribe link | — |
 | T2.17 | ⬜ To do | `contacts.consent` UI + DNC enforcement across all senders | — |
-| T2.18 | ⬜ To do | Jibble connection: Setup → Integrations, Client ID + Secret encrypted (envelope, like CallerDesk), token cached in Redis, Test connection; Admin / Super Admin only; adapter `lib/providers/workforce/jibble.ts` | Owner request 2026-10-05 |
-| T2.19 | ⬜ To do | Employee sync: Jibble People ↔ CRM users by email (daily + on demand); unmatched list with manual link; code, group, position, managers, status → `employee_links` / HR profiles (T1.49) | Owner request 2026-10-05 |
-| T2.20 | ⬜ To do | Live attendance on Floor: clocked in / on break / out per agent (GetCurrentTotalsForScope + People latest entry), polled every 5 min on the existing sweep, Redis presence kept 10 min (longer than the poll) and treated as unknown — not "clocked out" — when older than that | Owner request 2026-10-05 |
-| T2.21 | ⬜ To do | Mismatch alerts to supervisors: on calls / active in CRM but not clocked in; clocked in but no calls for X min; on Jibble break while taking calls | Owner request 2026-10-05 |
+| T2.18 | 🟡 In progress | Jibble connection: Setup → Integrations, Client ID + Secret encrypted (envelope, like CallerDesk), token cached in Redis, Test connection; Admin / Super Admin only; adapter `lib/providers/workforce/jibble.ts` | Owner request 2026-10-05. Built 2026-10-06: Setup → Attendance (Jibble), Super Admin only (one org for all workspaces), Client ID + Secret encrypted, Test connection per API part, Sync now, Disconnect; adapter `lib/providers/workforce/jibble.ts` (token cached in memory, not Redis). Waiting: live test with the owner's key |
+| T2.19 | 🟡 In progress | Employee sync: Jibble People ↔ CRM users by email (daily + on demand); unmatched list with manual link; code, group, position, managers, status → `employee_links` / HR profiles (T1.49) | Owner request 2026-10-05. Built: People ↔ CRM logins by email (daily + Sync now), unmatched list with manual link to a member; `workforce_people` (platform table). HR profiles (T1.49) later. Waiting: live test |
+| T2.20 | 🟡 In progress | Live attendance on Floor: clocked in / on break / out per agent (GetCurrentTotalsForScope + People latest entry), polled every 5 min on the existing sweep, Redis presence kept 10 min (longer than the poll) and treated as unknown — not "clocked out" — when older than that | Owner request 2026-10-05. Built: Attendance → Today (in / break / out / unknown, since, first in, worked, breaks, calls) + Jibble state on Floor; clock events polled every 5 min (tick) and on Attendance/Floor views while crons are daily; presence older than 10 min = unknown. Waiting: live test |
+| T2.21 | 🟡 In progress | Mismatch alerts to supervisors: on calls / active in CRM but not clocked in; clocked in but no calls for X min; on Jibble break while taking calls | Owner request 2026-10-05. Built: alerts on Attendance → Today (on calls but not clocked in, calls on a break, clocked in with no calls 30+ min). Notifications to supervisors left |
 | T2.22 | ⬜ To do | Attendance-aware assignment: eligibility adds "clocked in and not on break / leave" (per-process toggle, off by default) | Owner request 2026-10-05 |
-| T2.23 | ⬜ To do | Daily agent sheet: first in, last out, worked hours, breaks, late vs Jibble schedule + CRM calls, connected, talk time, leads, conversions → talk-time %, calls / worked hour | Owner request 2026-10-05 |
+| T2.23 | 🟡 In progress | Daily agent sheet: first in, last out, worked hours, breaks, late vs Jibble schedule + CRM calls, connected, talk time, leads, conversions → talk-time %, calls / worked hour | Owner request 2026-10-05. Built: Attendance → Day sheet (first in, last out, worked, breaks + dialled, connected, talk, talk %, dials / worked hour) for any period. Late vs Jibble schedule left (schedules not synced yet) |
 | T2.24 | ⬜ To do | Weekly / monthly productivity per team and process with Excel export (TimesheetsSummary, TrackedTimeReport) | Owner request 2026-10-05 |
-| T2.25 | ⬜ To do | Leave and holidays: who is on leave today / upcoming; assignment skips them; callbacks booked for an agent on leave flagged for reassignment | Owner request 2026-10-05 |
-| T2.26 | ⬜ To do | Holiday calendar (Jibble Calendars) feeds process working hours and SLA clocks | Owner request 2026-10-05 |
+| T2.25 | 🟡 In progress | Leave and holidays: who is on leave today / upcoming; assignment skips them; callbacks booked for an agent on leave flagged for reassignment | Owner request 2026-10-05. Built: leave synced (−7…+30 days), Attendance → Leave & holidays (today, upcoming, pending); assignment skips people on approved leave today (users.on_leave_on). Flagging callbacks of people on leave left |
+| T2.26 | 🟡 In progress | Holiday calendar (Jibble Calendars) feeds process working hours and SLA clocks | Owner request 2026-10-05. Holidays imported from Jibble and shown on Attendance → Leave & holidays; feeding process working hours / SLA clocks left |
 | T2.27 | ⬜ To do | Billable hours per client for Accounts (T1.50): Jibble projects/clients ↔ CRM workspaces/processes; monthly hours from timesheets | Owner request 2026-10-05 |
 | T2.28 | ⬜ To do | Auditor / HR attendance audit: clock-in location + device, outside-geofence flag, timesheet approval status; Jibble screenshots optional (off by default, role-limited) | Owner request 2026-10-05 |
 | T2.29 | ⬜ To do | Two-way (opt-in, off by default): CRM Available / Break / Offline → Jibble clock in / break / clock out; verify break handling against the live Jibble setup first | Owner request 2026-10-05 |
@@ -197,7 +197,7 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | Task | Status | What | Notes |
 | --- | --- | --- | --- |
 | T3.1 | ⬜ To do | Daily rollup cron 00:30 (`$merge` into `daily_stats`) | — |
-| T3.2 | ⬜ To do | Dashboards: funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, week/month/quarter comparisons, day-of-week, stale leads, overdue callbacks | — |
+| T3.2 | 🟡 In progress | Dashboards: funnel, leaderboard, source performance, callback compliance, time to convert, win/loss, week/month/quarter comparisons, day-of-week, stale leads, overdue callbacks | Reports module live 2026-10-05 (/reports, live queries on the replica, any range ≤ 92 days): Overview (funnel, trend, stage mix, lost reasons, median first call / time to win), Agents (summary + day sheet: login/logout, first/last call, dialled vs connected per hour, talk, outcomes, conversion, callback compliance), Sources, Calls & callbacks (by hour/weekday/day, results, outcomes, compliance); CSV per table. Left: week/month/quarter comparisons, stale-lead view, daily_stats rollup (T3.1) for large ranges |
 | T3.3 | 🟡 In progress | CSV export (streamed; large → file + emailed link), masking by role, audit-logged | Leads → Export (current filter, ≤10k rows, masked per role, audited) done 2026-10-02; large export → emailed link left |
 | T3.4 | ⬜ To do | Agent weekly report cron (Mon 08:00) | — |
 | T3.5 | ⬜ To do | Client portal: processes, masked leads, assigned reports | — |
@@ -214,6 +214,7 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | T3.16 | ✅ Done | Create 1–2 Neon read replicas; set `DATABASE_REPLICA_URLS` in Vercel; move dashboard/report/export queries to `withTenantRead()` | replica-1 live, DATABASE_REPLICA_URLS set, Floor/Leads/Calls/reports read via withTenantRead (least connections + failover) |
 | T3.17 | ⬜ To do | DR runbook + drill: restore latest backup into a Neon project in another region, repoint `DATABASE_URL`, measure RTO | — |
 | T3.18 | ⬜ To do | Uptime monitor on `/api/health` (alert when `ok:false` or any replica out of rotation) | — |
+| T3.19 | ⬜ To do | Multi-workspace people management (Super Admin): People directory across all workspaces (each login, its workspaces, role per workspace, status; search); add / remove a person to workspaces and set the role per workspace from one place (no switching in); Setup → Team badge "also in N other workspaces"; Add user can pick several workspaces + roles at once. Keeps the SECURITY.md §3.1 rule (cross-workspace linking = Super Admin only) | Owner request 2026-10-06 |
 
 **Phase gate:** ⬜ all clients off Sheets; Apps Script read-only
 
@@ -274,6 +275,8 @@ Features the owner asked for while building. Each is live unless marked otherwis
 | 2026-10-05 | Scale hardening for 200–300 clients / 500–600 users (code review): background jobs time-boxed and fair per client, call sync in turn (or one job per client with QUEUE_FANOUT=1 on paid QStash), SLA alerts once, chunked clean-up, office-safe login limit, API limits per workspace and per person, lighter console/bell/Floor polling. Paid QStash + load test still needed before go-live | 1 | ✅ Done |
 | 2026-10-05 | Load test tooling (`scripts/loadtest`): isolated Neon branch, local QStash/Redis stand-ins, 4 app instances, simulated agents + webhooks. First run: free QStash = ~2–4 agents; app fine to ~150 agents from a laptop, limited by laptop→Singapore latency beyond that | 1 | ✅ Done |
 | 2026-10-05 | Automatic queue safety net: if QStash refuses messages (quota used up, plan lapsed, outage) the app switches to backup mode by itself — webhooks still accepted and processed, leads assigned, fan-out off, timer work driven by page views and daily crons — and Super Admins get an alert + banner | 1 | ✅ Done |
+| 2026-10-06 | Attendance module (sidebar → Attendance, Setup → Attendance (Jibble)): Jibble connection, people matched by email, Today (who's in / on break / out / on leave + alerts), Day sheet (worked hours joined with calls), Leave & holidays; Jibble state on Floor; new leads skip people on approved leave. Needs the owner's Jibble key + migration 0016 | 2 | 🟡 In progress (T2.18–T2.26) |
+| 2026-10-05 | Reports module (sidebar → Reports): Overview, Agents (login/logout, first/last call, dialled & connected per hour, talk time, outcomes, conversion, callback compliance, day sheet), Sources, Calls & callbacks; any period up to 92 days, process filter, CSV per table | 3 | 🟡 In progress (T3.2) |
 | 2026-10-05 | Security: SQL injection guard (lint ban on raw SQL + tests) and rate limits on every screen action, Sync now and webhook key guessing | 1 | ✅ Done |
 | 2026-10-05 | Security: opening a module, Setup tab, lead or process by URL without permission (another workspace, someone else's lead) shows a 404 page (same as a page that doesn't exist), with a funny AM2PM clock logo | 1 | ✅ Done |
 | 2026-10-05 | Module access: Setup → Roles has a grid to choose which modules (Console, Leads, Calls, Floor, Setup, Coming soon) each role sees in this workspace; hidden modules can't be opened by URL either. Any role can be given any module (adds the View it needs). Default / Cancel / Save buttons; nothing changes until Save | 1 | ✅ Done |
@@ -292,6 +295,9 @@ Features the owner asked for while building. Each is live unless marked otherwis
 
 | Date | Change |
 | --- | --- |
+| 2026-10-06 | Owner request: manage one person across several workspaces from one place — added as T3.19 (Phase 3). Today it works by adding the same email in each workspace's Team (Super Admin) |
+| 2026-10-06 | Owner request: Attendance module from Jibble — connect + employee sync (by email), live attendance, daily agent sheet, leave & holidays. T2.18–T2.21, T2.23, T2.25, T2.26 started |
+| 2026-10-05 | Owner request: Reports module — funnel, agents (first/last call, per-hour dialled/connected, login/logout), sources, calls & callbacks. T3.2 started |
 | 2026-10-05 | Owner request: protect against SQL injection; rate limiting |
 | 2026-10-05 | Owner request: no access by URL → 404 page with the AM2PM logo |
 | 2026-10-05 | Owner request: choose module access per role in Setup → Roles |

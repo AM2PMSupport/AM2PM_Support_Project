@@ -13,6 +13,8 @@ import { withTenantRead } from "@/lib/db/tenant";
 import { leadScope } from "@/lib/auth/rbac";
 import type { SessionContext } from "@/lib/auth/session";
 import { keys, redis } from "@/lib/redis/client";
+import { attendanceFor } from "@/lib/platform-admin/attendance";
+import { shownPresence, type Presence } from "@/lib/attendance/day";
 
 export interface FloorData {
   kpis: {
@@ -31,7 +33,7 @@ export interface FloorData {
   currentHour: number;
   funnel: { stage: string; count: number }[];
   sources: { source: string; leads: number; connectRate: number; conversions: number; avgFirstCallMin: number | null }[];
-  agents: { id: string; name: string; status: string; calls: number; talkMin: number; conversions: number; openLeads: number; maxOpen: number }[];
+  agents: { id: string; name: string; status: string; calls: number; talkMin: number; conversions: number; openLeads: number; maxOpen: number; jibble: Presence | null }[];
 }
 
 type Row = Record<string, unknown>;
@@ -101,7 +103,7 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
       group by 1 order by 2 desc`);
 
   const agentsQ = many(sql`
-      select u.id, u.name, u.is_available, u.open_leads, u.max_open_leads,
+      select u.id, u.name, u.account_id, u.is_available, u.open_leads, u.max_open_leads,
              (select count(*) from interactions i where i.agent_id = u.id and i.type = 'call' and i.started_at >= ${dayStart}) as calls,
              (select coalesce(sum(i.duration_sec), 0) from interactions i where i.agent_id = u.id and i.type = 'call' and i.started_at >= ${dayStart}) as talk_sec,
              (select count(*) from leads l where l.deleted_at is null and l.assigned_to = u.id and l.converted_at >= ${dayStart}) as conversions
@@ -113,13 +115,17 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
   // Presence from Redis (on_call / wrap_up / available / break), chained onto
   // the agents query so it overlaps the other statements; falls back to DB availability.
   const withPresence = agentsQ.then(async (agents) => {
+    // Jibble clock state (T2.20) next to CRM presence; Jibble down/unconnected → no column value.
+    const jibble = attendanceFor(agents.flatMap((a) => (a.account_id ? [String(a.account_id)] : [])), "9999-12-31", "9999-12-31").catch(() => null);
     try {
-      return { agents, presence: agents.length ? await redis().mget<(string | null)[]>(...agents.map((a) => keys.presence(ctx.tenantId, String(a.id)))) : [] };
+      return { agents, presence: agents.length ? await redis().mget<(string | null)[]>(...agents.map((a) => keys.presence(ctx.tenantId, String(a.id)))) : [], jibble: await jibble };
     } catch {
-      return { agents, presence: [] as (string | null)[] };
+      return { agents, presence: [] as (string | null)[], jibble: await jibble };
     }
   });
-  const [k0, byHour, funnel, sources, { agents, presence }] = await Promise.all([kQ, byHourQ, funnelQ, sourcesQ, withPresence]);
+  const [k0, byHour, funnel, sources, { agents, presence, jibble }] = await Promise.all([kQ, byHourQ, funnelQ, sourcesQ, withPresence]);
+  const jibbleOf = new Map((jibble?.people ?? []).map((p) => [p.accountId, p]));
+  const now = Date.now();
   const data = { k: k0, byHour, hourNow: k0, funnel, sources, agents };
 
   const k = data.k;
@@ -166,6 +172,7 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
       conversions: n(a.conversions),
       openLeads: n(a.open_leads),
       maxOpen: n(a.max_open_leads),
+      jibble: jibble?.connected && a.account_id && jibbleOf.has(String(a.account_id)) ? shownPresence(jibbleOf.get(String(a.account_id))!.state, jibble.syncedAt, now) : null,
     })),
   };
 }

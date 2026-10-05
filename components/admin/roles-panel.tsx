@@ -38,7 +38,7 @@ import { Portal } from "@/components/ui/portal";
 const ACTION_LABEL: Record<Action, string> = { V: "View", C: "Create", E: "Edit", D: "Delete", A: "Approve", X: "Export", I: "Import" };
 const MODULE_LABEL: Partial<Record<Module, string>> = { config: "Config", import_sources: "Import sources", employees: "Employees (HR)", billing: "Billing (Accounts)" };
 const moduleLabel = (m: Module) => MODULE_LABEL[m] ?? m.charAt(0).toUpperCase() + m.slice(1).replace(/_/g, " ");
-const SCREEN_LABEL: Record<Screen, string> = { console: "Console", leads: "Leads", calls: "Calls", dashboard: "Floor", admin: "Setup", soon: "Coming soon" };
+const SCREEN_LABEL: Record<Screen, string> = { console: "Console", leads: "Leads", calls: "Calls", dashboard: "Floor", reports: "Reports", attendance: "Attendance", admin: "Setup", soon: "Coming soon" };
 
 type Edit = { role: string; module: string; actions: string };
 /** Draft: "role|key" → actions, for every editable role × key. */

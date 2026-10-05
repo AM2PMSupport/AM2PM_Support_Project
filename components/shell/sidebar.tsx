@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { AudioLines, BarChart3, Headset, LayoutGrid, Settings2, UsersRound } from "lucide-react";
+import { AudioLines, BarChart3, Clock3, FileBarChart, Headset, LayoutGrid, Settings2, UsersRound } from "lucide-react";
 import { LogoMark } from "@/components/ui/logo";
 import type { AgentStatus } from "@/lib/ui/sample-data";
 import { STATUS_META } from "@/lib/ui/status";
@@ -21,6 +21,8 @@ const NAV = [
   { key: "leads", href: "/leads", label: "Leads", icon: UsersRound },
   { key: "calls", href: "/calls", label: "Calls", icon: AudioLines },
   { key: "dashboard", href: "/dashboard", label: "Floor", icon: BarChart3 },
+  { key: "reports", href: "/reports", label: "Reports", icon: FileBarChart },
+  { key: "attendance", href: "/attendance", label: "Attendance", icon: Clock3 },
   { key: "admin", href: "/admin", label: "Setup", icon: Settings2 },
 ] as const;
 

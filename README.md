@@ -44,6 +44,8 @@ Each folder owns one concern, so the project scales by **adding** folders and fi
 app/
   login/                                      sign-in (Auth.js in T1.11)
   (app)/console · leads · dashboard · admin   agent console, leads + search, Floor dashboard, Setup
+  (app)/reports                               Reports: overview, agents, sources, calls & callbacks (live, CSV)
+  (app)/attendance                            Attendance from Jibble: today, day sheet, leave & holidays
   (app)/soon                                  coming-soon showcase of planned modules (sample data)
   globals.css                                 design tokens (paper/ink, brand teal + orange)
   api/hooks/[tenant]/[source]/route.ts        lead-source webhooks: verify key → store → queue

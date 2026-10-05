@@ -82,6 +82,13 @@ describe("eligibility", () => {
     expect(eligibleUsers({ ...base, assignment: assignment({ pool: [b.id] }), users: [a, b] })).toEqual([b]);
   });
 
+  it("skips agents on approved Jibble leave today (tenant-local), not on another day", () => {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: base.timeZone }).format(base.now);
+    const away = user({ onLeaveOn: today });
+    const back = user({ onLeaveOn: "2000-01-01" });
+    expect(eligibleUsers({ ...base, assignment: assignment(), users: [away, back] })).toEqual([back]);
+  });
+
   it("number method skips agents at their daily quota", () => {
     const a = user({ dailyQuota: 2 });
     const b = user({ dailyQuota: 2 });

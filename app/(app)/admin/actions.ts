@@ -22,6 +22,8 @@ import { CompanyInput, updateCompany } from "@/lib/admin/company";
 import { createApiKey, revokeApiKey } from "@/lib/admin/api-keys";
 import { removeSampleData } from "@/lib/admin/sample-data";
 import { setRolePermissions } from "@/lib/admin/roles";
+import { disconnectJibble, linkPerson, saveJibble, syncAttendance, testJibble } from "@/lib/platform-admin/attendance";
+import { accountOfMember } from "@/lib/attendance/view";
 import { cookies } from "next/headers";
 import { membershipsOf } from "@/lib/platform-admin/auth";
 import { sessionCookieOptions, sessionToken } from "@/lib/auth/cookie";
@@ -124,3 +126,21 @@ export async function createApiKeyAction(input: { name: string; scope: "read" | 
 export async function revokeApiKeyAction(id: string) {
   return run((ctx) => revokeApiKey(ctx, z.uuid().parse(id)));
 }
+
+// Attendance (Jibble) — Super Admin only (checked in lib/platform-admin/attendance.ts).
+export const saveJibbleAction = async (input: unknown) => run((ctx) => saveJibble(ctx, input));
+export const testJibbleAction = async () => run((ctx) => testJibble(ctx));
+export const disconnectJibbleAction = async () => run((ctx) => disconnectJibble(ctx));
+export const syncJibbleAction = async () =>
+  run(async (ctx) => {
+    if (ctx.actor.role !== "super_admin") throw new ApiError(403, "forbidden", "Only a Super Admin can sync Jibble");
+    return syncAttendance({ force: true });
+  });
+/** Link a Jibble person to a member of THIS workspace (their login), or unlink. */
+export const linkJibblePersonAction = async (personId: unknown, userId: unknown) =>
+  run(async (ctx) => {
+    const pid = z.uuid().parse(personId);
+    const uid = z.uuid().nullable().parse(userId);
+    const accountId = uid ? await accountOfMember(ctx, uid) : null;
+    return linkPerson(ctx, pid, accountId);
+  });

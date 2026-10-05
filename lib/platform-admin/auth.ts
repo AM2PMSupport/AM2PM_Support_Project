@@ -18,7 +18,7 @@
  *     active workspace) on every switch.
  */
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
-import { accounts, tenants, users, type Role } from "@/lib/db/schema";
+import { accounts, auditLogs, tenants, users, type Role } from "@/lib/db/schema";
 import { platformDb } from "@/lib/platform-admin/db";
 import { generatePassword, hashPassword } from "@/lib/auth/password";
 import { conflict, forbidden } from "@/lib/http/errors";
@@ -74,6 +74,8 @@ export async function recordLogin(accountId: string, userId: string, tenantId: s
   const now = new Date();
   await platformDb().update(accounts).set({ lastLoginAt: now, lastTenantId: tenantId }).where(eq(accounts.id, accountId));
   await platformDb().update(users).set({ lastLoginAt: now }).where(and(eq(users.id, userId), eq(users.tenantId, tenantId)));
+  // Login history per workspace (Reports → Agents: login time of the day).
+  await platformDb().insert(auditLogs).values({ tenantId, actorId: userId, action: "auth.login", entity: "user", entityId: userId, createdAt: now });
 }
 
 /**

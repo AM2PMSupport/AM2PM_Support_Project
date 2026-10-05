@@ -13,7 +13,9 @@ describe("coming-soon showcase catalogue", () => {
     }
   });
   it("looks modules up by slug", () => {
-    expect(soonModule("reports")?.title).toBe("Reports & analytics");
+    expect(soonModule("campaigns")?.title).toBe("WhatsApp & email campaigns");
+    expect(soonModule("reports")).toBeUndefined(); // shipped: /reports
+    expect(soonModule("attendance")).toBeUndefined(); // shipped: /attendance
     expect(soonModule("nope")).toBeUndefined();
   });
 });

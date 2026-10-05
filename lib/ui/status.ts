@@ -12,3 +12,9 @@ export const STATUS_META: Record<AgentStatus, { label: string; dot: string }> = 
   break: { label: "Break", dot: "bg-ink-4" },
   offline: { label: "Offline", dot: "bg-ink-3" },
 };
+
+/** Lead source kinds → labels (Floor, Reports). */
+export const SOURCE_LABEL: Record<string, string> = {
+  meta_ads: "Meta Ads", web_form: "Website", indiamart: "IndiaMART", justdial: "Justdial", inbound_call: "Inbound call",
+  csv: "CSV import", google_ads: "Google Ads", sheet: "Google Sheet", api: "API", manual: "Manual",
+};

@@ -62,6 +62,7 @@ export async function assignLead(ctx: TenantContext, leadId: string, now = new D
         dailyQuota: users.dailyQuota,
         skills: users.skills,
         shareWeight: users.shareWeight,
+        onLeaveOn: users.onLeaveOn,
       })
       .from(users)
       .innerJoin(userProcesses, and(eq(userProcesses.userId, users.id), eq(userProcesses.processId, process.id)))

@@ -2,7 +2,8 @@
  * Who may receive a lead right now (DESIGN.md §4). Pure functions.
  *
  * Fixed order (RULE.md §4.3):
- *   active → mapped to the process (and in its pool) → available →
+ *   active → mapped to the process (and in its pool) → available (and not on
+ *   approved Jibble leave today) →
  *   inside working hours → under maxOpenLeads → under daily quota → skills.
  *
  * "Mapped to the process" is enforced by the SQL join on user_processes in
@@ -36,7 +37,7 @@ export function withinWorkingHours(hours: WorkingHours | undefined, at: Date, ti
   return hours.start <= hhmm && hhmm < hours.end;
 }
 
-type EligibilityUser = Pick<User, "id" | "status" | "isAvailable" | "openLeads" | "maxOpenLeads" | "dailyQuota" | "skills">;
+type EligibilityUser = Pick<User, "id" | "status" | "isAvailable" | "openLeads" | "maxOpenLeads" | "dailyQuota" | "skills"> & Partial<Pick<User, "onLeaveOn">>;
 
 export interface EligibilityInput<U extends EligibilityUser> {
   assignment: AssignmentConfig;
@@ -54,11 +55,14 @@ export function eligibleUsers<U extends EligibilityUser>(input: EligibilityInput
   const { assignment, users, dailyCounts, requiredSkills = [], now, timeZone } = input;
   if (!withinWorkingHours(assignment.workingHours, now, timeZone)) return [];
   const pool = new Set(assignment.pool ?? []);
+  const today = localParts(now, timeZone).day;
 
   return users.filter((u) => {
     if (u.status !== "active") return false;
     if (pool.size && !pool.has(u.id)) return false;
     if (!u.isAvailable) return false;
+    // Approved leave in Jibble today (stamped by the attendance sync, T2.25). A stale stamp from another day doesn't count.
+    if (u.onLeaveOn && u.onLeaveOn === today) return false;
     if (u.openLeads >= u.maxOpenLeads) return false;
     if (assignment.method === "number" && (u.dailyQuota ?? 0) <= (dailyCounts[u.id] ?? 0)) return false;
     if (assignment.method === "skill" && !requiredSkills.every((s) => u.skills.includes(s))) return false;

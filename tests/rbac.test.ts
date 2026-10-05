@@ -27,10 +27,12 @@ describe("permission matrix (DESIGN.md §7)", () => {
   });
 
   it("builds the nav and home page per role", () => {
-    expect(navFor({ role: "agent" })).toEqual(["console", "leads", "calls", "soon"]);
-    expect(navFor({ role: "manager" })).toEqual(["console", "leads", "calls", "dashboard", "admin", "soon"]);
-    expect(navFor({ role: "super_admin" })).toEqual(["console", "leads", "calls", "dashboard", "admin", "soon"]);
-    expect(navFor({ role: "trainer" })).toEqual(["dashboard", "soon"]);
+    expect(navFor({ role: "agent" })).toEqual(["console", "leads", "calls", "reports", "attendance", "soon"]); // reports / attendance: own only
+    expect(navFor({ role: "manager" })).toEqual(["console", "leads", "calls", "dashboard", "reports", "attendance", "admin", "soon"]);
+    expect(navFor({ role: "super_admin" })).toEqual(["console", "leads", "calls", "dashboard", "reports", "attendance", "admin", "soon"]);
+    expect(navFor({ role: "accounts" })).not.toContain("attendance");
+    expect(navFor({ role: "client" })).not.toContain("reports"); // off until the client portal (T3.5)
+    expect(navFor({ role: "trainer" })).toEqual(["dashboard", "reports", "soon"]);
     expect(homeFor({ role: "trainer" })).toBe("/dashboard");
     expect(homeFor({ role: "client" })).toBe("/dashboard");
     expect(homeFor({ role: "agent" })).toBe("/console");
@@ -71,7 +73,7 @@ describe("new roles: HR, Auditor, Accounts (2026-10-05)", () => {
     expect(can({ role: "hr" }, "employees", "E")).toBe(true);
     expect(can({ role: "hr" }, "leads", "V")).toBe(false);
     expect(leadScope("hr")).toBe("process");
-    expect(navFor({ role: "hr" })).toEqual(["admin", "soon"]);
+    expect(navFor({ role: "hr" })).toEqual(["attendance", "admin", "soon"]);
     expect(homeFor({ role: "hr" })).toBe("/admin");
   });
 
@@ -147,7 +149,7 @@ describe("module access (Setup → Roles)", () => {
 
   it("hides a switched-off module and moves home to the next one", () => {
     const grants = effectiveGrants("agent", [off("agent", "console"), off("agent", "soon")]);
-    expect(navFor({ role: "agent", grants })).toEqual(["leads", "calls"]);
+    expect(navFor({ role: "agent", grants })).toEqual(["leads", "calls", "reports", "attendance"]);
     expect(homeFor({ role: "agent", grants })).toBe("/no-access");
     expect(landingAfterSwitch({ role: "agent", grants }, "/console")).toBe("/no-access");
   });

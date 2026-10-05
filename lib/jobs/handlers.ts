@@ -11,6 +11,7 @@ import { processWebhook } from "@/lib/jobs/process-webhook";
 import { contextForTenantId } from "@/lib/platform-admin/tenants";
 import { purgeExpired, recountOpenLeads, relayOutbox, requeueStuckWebhooks, sweepStuckCalls, sweepUnassigned } from "@/lib/platform-admin/sweeps";
 import { runCallbackReminders } from "@/lib/platform-admin/reminders";
+import { syncAttendanceIfStale } from "@/lib/platform-admin/attendance";
 import { runImportChunk } from "@/lib/imports/run";
 import { copyRecording } from "@/lib/telephony/recordings";
 import { syncCalls } from "@/lib/telephony/sync";
@@ -108,7 +109,11 @@ export const handlers: Handlers = {
   tick: async () => {
     const deadline = Date.now() + TICK_BUDGET_MS;
     const quarter = new Date().getUTCMinutes() % 15 < 5;
-    const parts: [string, () => Promise<unknown>][] = [["callback-reminders", () => runCallbackReminders(new Date(), deadline)]];
+    const parts: [string, () => Promise<unknown>][] = [
+      ["callback-reminders", () => runCallbackReminders(new Date(), deadline)],
+      // Jibble has no webhooks: poll clock events (people + leave on their own slower clocks).
+      ["attendance", syncAttendanceIfStale],
+    ];
     if (quarter) {
       parts.push(
         ["relay-outbox", relayOutbox],

@@ -170,8 +170,8 @@ Optional routing lookup (phase 2, provider permitting): provider asks `POST /api
 | Manager digest | 09:00 | `runNotifications` | Hot leads, follow-ups due, disposition counts |
 | Agent weekly report | Mon 08:00 | `sendAllUserReports` | Per-agent summary |
 | Open-leads recount | 02:30 | — | `recount-open-leads`: fix `users.open_leads` drift |
-| Jibble attendance poll | every 5 min (on the existing sweep) | — | T2.20: time entries since the last cursor + live totals → `attendance_events`, Redis presence kept 10 min (must outlive the poll); stale/missing presence = "unknown", and attendance-aware assignment (T2.22) then ignores attendance rather than assigning nobody. Inline mode: clients in turn within the tick budget (like call sync); Jibble has no webhooks |
-| Jibble people + leave sync | 03:15 daily | — | T2.19/T2.25: People ↔ users by email, leave + holidays for the next 30 days |
+| Jibble attendance poll | every 5 min (tick part `attendance`) + on Attendance / Floor views via `after()` when the last poll is > 5 min old (crons are daily on Hobby) | — | Built 2026-10-06 (`syncAttendance`): one platform-wide sync at a time (Redis lock); clock events since the cursor − 10 min → `workforce_entries` (ON CONFLICT DO NOTHING) → each person's state; presence older than 10 min shows "unknown". Jibble has no webhooks |
+| Jibble people + leave sync | inside the same sync: people daily, leave + holidays every 6 h, all on Sync now | — | T2.19/T2.25: People ↔ accounts by email; leave −7…+30 days; then `users.on_leave_on` for approved leave today |
 
 ## 5. Multi-tenancy
 
@@ -271,7 +271,7 @@ Every layer either replicates itself (managed services) or fails over in our cod
          ▼                     least-connections pick (lib/db/least-connections.ts)
    Neon PRIMARY compute ◄─── fallback ───┤ circuit breaker: replica down → primary for 30 s
          │                      ┌────────┼────────┐
-         │                  replica-1 replica-2 replica-3   (Neon read replicas, autoscale)
+         │                  replica-1 [replica-2] [replica-3]   (Neon read replicas; only replica-1 is live — §10.6)
          └──────────┬───────────┴────────┴────────┘
        Neon storage: WAL replicated across 3 AWS availability zones (safekeepers, Paxos)
                     + pageservers with secondaries + object storage (11 nines durability)
@@ -321,3 +321,48 @@ Every query has an index built for it, and partial-text search uses trigram inde
 | Availability (app + DB) | 99.5% | 99.9% (Pro, replicas, monitoring on `/api/health`) |
 | RPO (data loss) | Minutes within a region (PITR on Launch); ≤ 24 h cross-region | Same; 6 h with premium backups |
 | RTO | Minutes for compute/AZ failures; hours for region loss | Same, with a rehearsed DR runbook |
+
+### 10.6 Live Neon setup (checked with `neonctl` on 2026-10-06)
+
+| Item | Value |
+| --- | --- |
+| Project | `jolly-flower-95357933` "am2pm-crm-db" · Postgres 18 · AWS `ap-southeast-1` (Singapore) · **Free plan** · point-in-time history **6 h** |
+| Branches | **1** — `main` (`br-super-flower-b3d7pssg`, ~37 MB). The load-test branch was deleted after the run. |
+| Primary (read-write) | `ep-gentle-butterfly-b3tnm1nw` · **0.25 CU fixed** (min = max, no autoscale) · always on |
+| Read replica 1 (read-only) | `ep-proud-sound-b3srh7ww` · 0.25–2 CU autoscale · same storage as the primary (no data copy), slightly behind |
+| Used by | Production (Vercel) **and** local dev — one database for both (see MEMORIE.md) |
+
+```
+                       Vercel functions (sin1) + local dev (npm run dev)
+                                       │
+          ┌────────────────────────────┼─────────────────────────────┐
+          │ withTenant (RLS)           │ platformDb (owner role)     │ withTenantRead (RLS, read-only)
+          │ every WRITE + read-then-   │ cross-workspace work        │ pure reads, least connections
+          │ write                      │                             │
+          ▼                            ▼                             ▼
+   ┌──────────────────────────────────────────────┐    ┌───────────────────────────────────┐
+   │ PRIMARY  ep-gentle-butterfly  0.25 CU fixed  │    │ REPLICA-1  ep-proud-sound  0.25–2 CU│
+   │ • Console: save outcome, stage, call start   │    │ • Leads list, search, filter counts │
+   │ • Leads: create / edit / bulk / import       │    │ • Calls log                         │
+   │ • Webhooks → process-webhook (calls, leads)  │    │ • Floor                             │
+   │ • Assignment (FOR UPDATE, open_leads)        │    │ • Reports (all tabs + CSV)          │
+   │ • Setup writes, roles, API keys, audit log   │    │ • Attendance screens (members+calls)│
+   │ • Sign-in, workspace switch (platformDb)     │    │ • Audit log viewer, login history   │
+   │ • Sweeps, reminders, outbox (platformDb)     │    │ • Role grants cache (30 s)          │
+   │ • Jibble sync → workforce_* (platformDb)     │    │ • Import progress                   │
+   └──────────────────────┬───────────────────────┘    └─────────────────┬─────────────────┘
+                          │  replica down → reads fall back to the primary for 30 s
+                          └───────────────────────┬──────────────────────┘
+                     Neon storage (shared): WAL across 3 AZs, pageservers, object storage
+```
+
+**Why one replica:** reports, Floor, lists and exports are the heavy reads. Keeping them off the primary means a manager's 30-day report never slows an agent saving an outcome or a webhook being processed. The replica scales itself up to 2 CU when reports get heavy, and down when idle.
+
+**Watch-outs for production** (none block today's pilot):
+
+1. **Primary is fixed at 0.25 CU** — every write, webhook and assignment runs on the smallest compute, and it can't autoscale. Raise its max (e.g. 0.25–2 CU) before real client volume; on the Free plan the limit is 2 CU (T3.13 moves to Launch).
+2. **History is 6 h** on Free — point-in-time restore only reaches back 6 hours. Launch/Scale give 7–30 days (T3.13); per-client nightly backups are T1.43.
+3. **Dev and prod share this database** — a migration from a laptop changes production (that's how 0015/0016 were applied on 2026-10-06). A separate `dev` branch would isolate local work.
+4. **No cross-region copy** — a Singapore outage needs the DR restore (§7, T3.17).
+5. **More replicas** only when one replica is busy (watch its CU in the Neon console): add with the command in §10.3, no code change.
+
