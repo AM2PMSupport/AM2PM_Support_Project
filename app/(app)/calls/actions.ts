@@ -3,20 +3,26 @@
 /** Calls screen: "Sync now" pulls today's provider call report (lib/telephony/sync.ts). */
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
+import { ApiError } from "@/lib/http/errors";
 import { can } from "@/lib/auth/rbac";
 import { syncCalls } from "@/lib/telephony/sync";
 import { log } from "@/lib/log";
+import { limitPerson, rateLimit } from "@/lib/http/rate-limit";
 
 export async function syncCallsAction(): Promise<{ ok: true; rows: number; failed: number } | { ok: false; error: string }> {
   const ctx = await getSession();
   if (!ctx) return { ok: false, error: "Your session has ended. Sign in again." };
   if (!can(ctx.actor, "config", "V")) return { ok: false, error: "Only supervisors and admins can sync calls" };
   try {
+    await limitPerson(ctx);
+    // Each sync pulls the provider's call report — at most 2 a minute per workspace, whoever clicks.
+    await rateLimit(`t:${ctx.tenantId}:rl:call-sync`, 2, "per workspace for Sync now");
     const r = await syncCalls(ctx);
     if (!r) return { ok: false, error: "Telephony isn't connected for this workspace" };
     revalidatePath("/calls");
     return { ok: true, rows: r.rows, failed: r.failed };
   } catch (err) {
+    if (err instanceof ApiError && err.status === 429) return { ok: false, error: err.message };
     log.error("manual call sync failed", { tenant: ctx.tenantSlug, err });
     return { ok: false, error: err instanceof Error ? err.message.slice(0, 200) : "Sync failed" };
   }

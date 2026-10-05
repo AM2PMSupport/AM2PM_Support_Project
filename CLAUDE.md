@@ -8,7 +8,7 @@ AM2PM Call Center CRM: a multi-client BPO CRM that replaces the per-client Googl
 
 **Progress tracking:** [WORKPHASE.md](WORKPHASE.md) is the owner's view of what is built in which phase; [TASK.md](TASK.md) holds the task specs. Whenever a task starts, finishes, is added (new owner request) or dropped, update BOTH in the same change, plus WORKPHASE's Overview, "Next up", "Added during the build" and Update log. `tests/workphase.test.ts` fails if they disagree.
 
-**Current state:** live on Vercel + Neon. Email/password sign-in with one login per person and a Zoho-style workspace switcher (SECURITY.md §3.1); Console, Leads (filters, saved filters, board, bulk actions), Floor and Setup (searchable grid) run on real data. Unfinished work is marked `TODO(T<id>)` in code and `[~]` in [TASK.md](TASK.md). Keep both current.
+**Current state:** live on Vercel + Neon. Email/password sign-in with one login per person and a Zoho-style workspace switcher (SECURITY.md §3.1); Console, Leads (filters, saved filters, board, bulk actions), Floor and Setup (searchable grid) run on real data; "Soon" (`/soon`) showcases planned modules on sample data (`lib/ui/coming-soon.ts`). Unfinished work is marked `TODO(T<id>)` in code and `[~]` in [TASK.md](TASK.md). Keep both current.
 
 ## Read before changing code
 

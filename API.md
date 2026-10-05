@@ -35,7 +35,7 @@ Base URL (production): `https://am2pmsupportproject.vercel.app`
 | Caller | Mechanism | Used by |
 | --- | --- | --- |
 | People (agents, managers, admins, clients) | Signed session cookie `am2pm_session` from `POST /api/auth/login` (email + password). Google / OTP / TOTP may be added later | `/api/v1/*`, `/api/graphql`, app screens |
-| Integrations, partners, client CRMs | **API key** `Authorization: Bearer am2pm_…` (Setup → API keys; shown once, SHA-256 stored). Acts as the admin who created it — same role, scope (RLS) and audit trail. Scope `read` (GET + GraphQL queries) or `write` (also creates/updates/deletes; else `403 read_only_key`). Rate limits: **600 requests/min per key** and **1,200/min per workspace across all its keys**; signed-in browser calls **300/min per person** → `429 rate_limited`. Revoked/unknown key → `401 invalid_api_key` | `/api/v1/*`, `/api/graphql` |
+| Integrations, partners, client CRMs | **API key** `Authorization: Bearer am2pm_…` (Setup → API keys; shown once, SHA-256 stored). Acts as the admin who created it — same role, scope (RLS) and audit trail. Scope `read` (GET + GraphQL queries) or `write` (also creates/updates/deletes; else `403 read_only_key`). Rate limits: **600 requests/min per key** and **1,200/min per workspace across all its keys**; signed-in browser calls **300/min per person**, shared with the app's own screen actions → `429 rate_limited`. Revoked/unknown key → `401 invalid_api_key` | `/api/v1/*`, `/api/graphql` |
 | Lead sources | Source key in header `x-source-key` (or `?key=`), shown once when the source is created | `/api/hooks/{tenant}/{sourceId}` |
 | Telephony provider | Per-tenant webhook secret in the URL path `/{key}` (current) or `?key=` (older URLs); CallerDesk sends no signature | `/api/hooks/{tenant}/telephony/{provider}/{key}` |
 | QStash (internal) | `Upstash-Signature` header, verified with current + next signing keys | `/api/jobs/*` |
@@ -54,6 +54,7 @@ Email + password sign-in. Body `{ "email": "…", "password": "…" }`.
 | 400 | `bad_request` | Missing / invalid email or password |
 | 401 | `invalid_credentials` | Wrong email or password (same message for both) |
 | 429 | `too_many_attempts` | 5 failures for this email or 300 from this IP in 15 min (a whole office shares one IP) |
+| 429 | `rate_limited` | Webhooks (`/api/hooks/*`): this IP sent 30 wrong keys / unknown workspace or source in 15 min |
 
 The login is one per person across workspaces (SECURITY.md §3.1); sign-in opens the workspace used last, and the in-app switcher re-issues the cookie for another membership. Cookies issued before 2026-10-02 (no login id) are rejected once — sign in again.
 

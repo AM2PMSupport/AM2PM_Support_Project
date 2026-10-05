@@ -13,6 +13,13 @@
  * defaults. A bare Role is deliberately NOT accepted, so a check can't
  * silently skip the workspace's edits.
  *
+ * Module access (2026-10-05): each sidebar module (SCREENS) is also a
+ * switch per role, stored in the same table as `screen.<name>` with "V" = on
+ * and "" = off (defaults: SCREEN_OFF). A module shows when it is on AND the
+ * role's permissions can use it (navAvailable). Switching a module on in
+ * Setup also grants View on the area it needs (SCREEN_NEEDS,
+ * lib/admin/roles.ts), so any role can be given any module per workspace.
+ *
  * Data scope is separate from permission: an agent may "VE" leads, but only
  * their OWN (leadScope). Tenant isolation itself is enforced by Postgres RLS;
  * these rules narrow access further inside a tenant.
@@ -57,8 +64,20 @@ export const ROLE_LABEL: Record<Role, string> = {
   accounts: "Accounts",
 };
 
-/** One role's grants: module → actions string (e.g. "VCE"). */
-export type Grants = Partial<Record<Module, string>>;
+/** Sidebar modules, in rail order. */
+export const SCREENS = ["console", "leads", "calls", "dashboard", "admin", "soon"] as const;
+export type Screen = (typeof SCREENS)[number];
+export type ScreenKey = `screen.${Screen}`;
+export const SCREEN_KEYS = SCREENS.map((s) => `screen.${s}` as ScreenKey);
+
+/** The permission area each module needs at least View on (Setup: any SETUP_MODULES; config is the one granted). */
+export const SCREEN_NEEDS: Record<Screen, Module | null> = { console: "leads", leads: "leads", calls: "interactions", dashboard: "reports", admin: "config", soon: null };
+
+/** Modules switched off by default (role can use them, but doesn't see them until a Super Admin turns them on). */
+const SCREEN_OFF: Partial<Record<Role, Screen[]>> = { agent: ["dashboard"], client: ["console", "leads", "calls"] };
+
+/** One role's grants: module → actions string (e.g. "VCE"), plus module-access switches. */
+export type Grants = Partial<Record<Module | ScreenKey, string>>;
 
 /** The actor a check is about. `grants` = this workspace's effective grants for the role. */
 export interface Who {
@@ -91,6 +110,7 @@ export const LOCKED_ROLES: readonly Role[] = ["super_admin"];
 export function defaultGrants(role: Role): Grants {
   const g: Grants = {};
   for (const m of MODULES) if (DEFAULTS[m][role]) g[m] = DEFAULTS[m][role];
+  for (const s of SCREENS) if (!SCREEN_OFF[role]?.includes(s)) g[`screen.${s}`] = "V";
   return g;
 }
 
@@ -98,6 +118,9 @@ export function defaultGrants(role: Role): Grants {
 export function normalizeActions(actions: string): string {
   return ACTIONS.filter((a) => actions.includes(a)).join("");
 }
+
+/** Every key a role_permissions row may hold. */
+export const GRANT_KEYS: readonly (Module | ScreenKey)[] = [...MODULES, ...SCREEN_KEYS];
 
 /**
  * Defaults + this workspace's stored edits → the grants checks use. Edits for
@@ -108,10 +131,11 @@ export function effectiveGrants(role: Role, edits: { role: string; module: strin
   const g = defaultGrants(role);
   if (LOCKED_ROLES.includes(role)) return g;
   for (const e of edits) {
-    if (e.role !== role || !(MODULES as readonly string[]).includes(e.module)) continue;
+    const key = e.module as Module | ScreenKey;
+    if (e.role !== role || !GRANT_KEYS.includes(key)) continue;
     const a = normalizeActions(e.actions);
-    if (a) g[e.module as Module] = a;
-    else delete g[e.module as Module];
+    if (a) g[key] = a;
+    else delete g[key];
   }
   return g;
 }
@@ -128,6 +152,23 @@ export function permissionMatrix(edits: { role: string; module: string; actions:
       if ((a ?? "") !== (DEFAULTS[module][r] ?? "")) edited[r] = true;
     }
     return { module, grants, edited };
+  });
+}
+
+/** Setup → Roles, Module access: per screen and role — switched on, usable with the role's permissions, changed from default. */
+export function screenMatrix(edits: { role: string; module: string; actions: string }[] = []): { screen: Screen; on: Partial<Record<Role, boolean>>; available: Partial<Record<Role, boolean>>; edited: Partial<Record<Role, boolean>> }[] {
+  const byRole = new Map(ROLES.map((r) => [r, effectiveGrants(r, edits)]));
+  return SCREENS.map((screen) => {
+    const on: Partial<Record<Role, boolean>> = {};
+    const available: Partial<Record<Role, boolean>> = {};
+    const edited: Partial<Record<Role, boolean>> = {};
+    for (const r of ROLES) {
+      const grants = byRole.get(r)!;
+      on[r] = !!grants[`screen.${screen}`];
+      available[r] = navAvailable({ role: r, grants }).includes(screen);
+      if (on[r] !== !!defaultGrants(r)[`screen.${screen}`]) edited[r] = true;
+    }
+    return { screen, on, available, edited };
   });
 }
 
@@ -165,12 +206,13 @@ export function leadScope(role: Role): LeadScope {
       return "process";
     case "agent":
       return "own";
-    // Client portal (cross-tenant, read-only) is Phase 3 (T3.5); trainers work in LMS (Phase 4).
+    // No lead rights by default (matrix). If a Super Admin grants them (Setup →
+    // Roles), they see the processes they're mapped to — never the whole workspace.
     case "client":
     case "trainer":
     case "hr":
     case "accounts":
-      return "none";
+      return "process";
   }
 }
 
@@ -182,22 +224,29 @@ export function canSeeFullPhone(role: Role): boolean {
 /** Setup areas; seeing any one of them opens Setup (each tab checks its own). */
 const SETUP_MODULES: Module[] = ["config", "users", "import_sources", "webhooks", "integrations", "audit", "employees", "billing"];
 
-/** Sidebar entries for this actor. */
-export function navFor(who: Who): ("console" | "leads" | "calls" | "dashboard" | "admin")[] {
-  const items: ("console" | "leads" | "calls" | "dashboard" | "admin")[] = [];
+/** Modules this actor's permissions can use, before the module-access switches. */
+export function navAvailable(who: Who): Screen[] {
+  const items: Screen[] = [];
   const scoped = leadScope(who.role) !== "none";
   if (scoped && can(who, "leads", "V")) items.push("console", "leads");
   // Calls log + recordings: anyone who may view interactions (agents: their own calls).
   if (scoped && can(who, "interactions", "V")) items.push("calls");
-  if (can(who, "reports", "V") && who.role !== "agent") items.push("dashboard");
+  if (can(who, "reports", "V")) items.push("dashboard"); // agents: switched off by default (SCREEN_OFF)
   if (SETUP_MODULES.some((m) => can(who, m, "V"))) items.push("admin");
+  items.push("soon"); // showcase on sample data — any role
   return items;
+}
+
+/** Sidebar entries for this actor: usable AND switched on in Setup → Roles → Module access. */
+export function navFor(who: Who): Screen[] {
+  const grants = who.grants ?? defaultGrants(who.role);
+  return navAvailable(who).filter((s) => grants[`screen.${s}`]);
 }
 
 /** Where an actor lands after sign-in. */
 export function homeFor(who: Who): string {
   const nav = navFor(who);
-  return nav.includes("console") ? "/console" : nav.includes("dashboard") ? "/dashboard" : nav.includes("admin") ? "/admin" : "/no-access";
+  return nav.includes("console") ? "/console" : nav.includes("dashboard") ? "/dashboard" : nav.includes("admin") ? "/admin" : nav.includes("soon") ? "/soon" : "/no-access";
 }
 
 /**
@@ -209,7 +258,7 @@ export function homeFor(who: Who): string {
  * back to home (never an open redirect).
  */
 export function landingAfterSwitch(who: Who, from: string | undefined): string {
-  const m = /^\/(console|leads|calls|dashboard|admin)(?:\?(.*))?$/.exec(from ?? "");
+  const m = /^\/(console|leads|calls|dashboard|admin|soon)(?:\/[a-z-]+)?(?:\?(.*))?$/.exec(from ?? "");
   const page = m?.[1] as ReturnType<typeof navFor>[number] | undefined;
   if (!page || !navFor(who).includes(page)) return homeFor(who);
   const tab = page === "admin" ? new URLSearchParams(m![2] ?? "").get("tab") : null;

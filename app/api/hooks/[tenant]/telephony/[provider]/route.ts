@@ -3,8 +3,9 @@
  * cloud telephony provider, for BOTH inbound and outbound (click-to-call)
  * calls. There is no SIP endpoint anywhere in this app (RULE.md §6.1).
  *
- * Verify with the provider adapter → store → queue → 200. The call logic runs
- * in the "process-webhook" job (lib/telephony/call-events.ts).
+ * Verify with the provider adapter → store → 200, then the call logic runs
+ * right after the response (processNow, lib/webhooks/receive.ts) so the
+ * agent's stepper moves within seconds; QStash only retries failures.
  * GET is accepted too because some providers send call events as GET.
  * The secret may be in the path (…/{provider}/{key}, see ./[key]/route.ts)
  * or in ?key= (older URLs).
@@ -15,6 +16,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { ApiError, handle, json, notFound, unauthorized } from "@/lib/http/errors";
 import { log } from "@/lib/log";
+import { assertWebhookIpAllowed, countBadWebhookKey } from "@/lib/http/rate-limit";
 import { tenantBySlug } from "@/lib/platform-admin/tenants";
 import { telephonyAdapter } from "@/lib/telephony/registry";
 import { systemContext } from "@/lib/tenancy/context";
@@ -24,9 +26,13 @@ type Ctx = { params: Promise<{ tenant: string; provider: string }> };
 
 async function receive(req: Request, { params }: Ctx): Promise<Response> {
   const { tenant: slug, provider } = await params;
+  await assertWebhookIpAllowed(req); // before any DB work
   const tenant = await tenantBySlug(slug);
   const adapter = telephonyAdapter(provider);
-  if (!tenant || !adapter) throw notFound();
+  if (!tenant || !adapter) {
+    await countBadWebhookKey(req);
+    throw notFound();
+  }
   const ctx = systemContext(tenant);
 
   const [integration] = await withTenant(ctx, (tx) =>
@@ -35,7 +41,10 @@ async function receive(req: Request, { params }: Ctx): Promise<Response> {
       .from(integrations)
       .where(and(eq(integrations.kind, "telephony"), eq(integrations.provider, provider), eq(integrations.status, "active"))),
   );
-  if (!integration) throw notFound();
+  if (!integration) {
+    await countBadWebhookKey(req);
+    throw notFound();
+  }
 
   const rawBody = req.method === "GET" ? "" : await req.text();
   let secret: string | undefined;
@@ -63,6 +72,7 @@ async function receive(req: Request, { params }: Ctx): Promise<Response> {
       contentType: req.headers.get("content-type") ?? "",
       fields: Object.keys(parseWebhookBody(req, rawBody)).slice(0, 25),
     });
+    await countBadWebhookKey(req);
     throw unauthorized("Invalid webhook signature");
   }
 
@@ -73,6 +83,7 @@ async function receive(req: Request, { params }: Ctx): Promise<Response> {
     payload,
     // GET events have no body; hash the parsed params so retries dedupe.
     rawBody: rawBody || JSON.stringify(payload),
+    processNow: true,
   });
   return json({ ok: true, duplicate });
 }

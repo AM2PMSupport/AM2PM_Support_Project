@@ -9,6 +9,7 @@
 import { revalidatePath } from "next/cache";
 import { z, ZodError } from "zod";
 import { getSession, type SessionContext } from "@/lib/auth/session";
+import { limitPerson } from "@/lib/http/rate-limit";
 import { ApiError } from "@/lib/http/errors";
 import { log } from "@/lib/log";
 import { ProcessInput, createProcess, updateProcess, DispositionInput, createDisposition, setDispositionActive } from "@/lib/admin/processes";
@@ -20,7 +21,7 @@ import { StartImportInput, startImport, listImports } from "@/lib/imports/run";
 import { CompanyInput, updateCompany } from "@/lib/admin/company";
 import { createApiKey, revokeApiKey } from "@/lib/admin/api-keys";
 import { removeSampleData } from "@/lib/admin/sample-data";
-import { PermissionInput, setRolePermission } from "@/lib/admin/roles";
+import { setRolePermissions } from "@/lib/admin/roles";
 import { cookies } from "next/headers";
 import { membershipsOf } from "@/lib/platform-admin/auth";
 import { sessionCookieOptions, sessionToken } from "@/lib/auth/cookie";
@@ -32,6 +33,7 @@ async function run<T>(fn: (ctx: SessionContext) => Promise<T>): Promise<ActionRe
   const ctx = await getSession();
   if (!ctx) return { ok: false, error: "Your session has ended. Sign in again." };
   try {
+    await limitPerson(ctx);
     const data = await fn(ctx);
     revalidatePath("/admin");
     return { ok: true, data };
@@ -55,8 +57,8 @@ export const createDispositionAction = async (input: unknown) => run((ctx) => cr
 export const toggleDispositionAction = async (id: unknown, active: unknown) => run((ctx) => setDispositionActive(ctx, Id.parse(id), z.boolean().parse(active)).then(() => undefined));
 
 // Roles & permissions (Super Admin only; enforced in lib/admin/roles.ts)
-export const setRolePermissionAction = async (input: unknown, reset?: unknown) =>
-  run((ctx) => setRolePermission(ctx, PermissionInput.parse(input), z.boolean().optional().parse(reset) ?? false));
+// Setup → Roles Save: every changed cell at once (validated in lib/admin/roles.ts).
+export const saveRolePermissionsAction = async (cells: unknown) => run((ctx) => setRolePermissions(ctx, cells).then(() => undefined));
 
 // Team
 export const createUserAction = async (input: unknown) => run((ctx) => createUser(ctx, UserInput.parse(input)));

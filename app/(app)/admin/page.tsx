@@ -10,8 +10,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { desc } from "drizzle-orm";
+import { notFound } from "next/navigation";
 import { requirePage } from "@/lib/auth/guard";
-import { can, permissionMatrix, ROLE_LABEL, type Who } from "@/lib/auth/rbac";
+import { can, ROLE_LABEL, type Who } from "@/lib/auth/rbac";
 import { workspaceEdits } from "@/lib/auth/grants";
 import { RolesPanel } from "@/components/admin/roles-panel";
 import { SetupHome, type SetupGroup } from "@/components/admin/setup-home";
@@ -173,6 +174,8 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   const role = ctx.actor.role;
   const seesConfig = can(ctx.actor, "config", "V");
   const tab = TABS.find((t) => t.id === sp.tab)?.id as TabId | undefined;
+  // A tab typed into the URL that doesn't exist or isn't this role's → 404, like any unknown page.
+  if (sp.tab !== undefined && (!tab || !tabVisible(tab, ctx.actor))) notFound();
   if (!tab) {
     return (
       <div className="flex min-h-dvh flex-col">
@@ -203,7 +206,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   } else if (tab === "data") {
     body = can(ctx.actor, "config", "V") ? <SampleDataPanel summary={await sampleDataSummary(ctx)} canEdit={can(ctx.actor, "config", "E")} /> : <NoAccess />;
   } else if (tab === "roles") {
-    body = can(ctx.actor, "users", "V") ? <RolesPanel matrix={permissionMatrix(edits ?? [])} myRole={role} canEdit={role === "super_admin"} /> : <NoAccess />;
+    body = can(ctx.actor, "users", "V") ? <RolesPanel key={JSON.stringify(edits ?? [])} edits={edits ?? []} myRole={role} canEdit={role === "super_admin"} /> : <NoAccess />;
   } else if (tab === "audit") {
     if (!can(ctx.actor, "audit", "V")) body = <NoAccess />;
     else {
@@ -265,7 +268,9 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   } else if (tab === "outcomes" && !seesConfig) {
     body = <NoAccess />;
   } else if (tab === "outcomes") {
-    const processId = sp.process && processes.some((p) => p.id === sp.process) ? sp.process : (processes[0]?.id ?? null);
+    // A process id from another workspace (or a typo) → 404, not a silent switch to the first process.
+    if (sp.process && !processes.some((p) => p.id === sp.process)) notFound();
+    const processId = sp.process ?? processes[0]?.id ?? null;
     const [outcomes, fields] = await Promise.all([processId ? listDispositions(ctx, processId) : Promise.resolve([]), listFields(ctx, processId)]);
     body = (
       <OutcomesPanel

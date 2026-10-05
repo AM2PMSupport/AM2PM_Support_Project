@@ -5,13 +5,20 @@
  *
  * No business logic runs here, so a burst of provider calls cannot slow the
  * API or lose data: everything is persisted first and processed by the
- * "process-webhook" job with retries and a dead-letter queue. This replaces
+ * "process-webhook" job with retries and a dead-letter queue.
+ *
+ * Exception, call webhooks (`processNow`, 2026-10-05, RULE.md §3.1): the
+ * agent's live call stepper waits on them, so they are processed right AFTER
+ * the 200 (next/server `after`) — no QStash hop, no wait when the free quota
+ * is used up. Still stored first; on failure the job is queued for retries. This replaces
  * crmv7's doPost, which held a 25-second script lock per request.
  */
 import { webhookEvents } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { sha256Hex } from "@/lib/crypto";
+import { after } from "next/server";
 import { enqueue } from "@/lib/queue/qstash";
+import { processWebhook } from "@/lib/jobs/process-webhook";
 import type { TenantContext } from "@/lib/tenancy/context";
 import { log } from "@/lib/log";
 
@@ -24,10 +31,12 @@ export interface ReceiveInput {
   rawBody: string;
   /** Provider's own event id when it sends one; else we hash the body. */
   providerEventId?: string;
+  /** Process right after the response instead of via QStash (call state). */
+  processNow?: boolean;
 }
 
 export async function receiveWebhook(input: ReceiveInput): Promise<{ duplicate: boolean }> {
-  const { ctx, source, payload, rawBody, providerEventId } = input;
+  const { ctx, source, payload, rawBody, providerEventId, processNow } = input;
   const idempotencyKey = providerEventId ?? sha256Hex(rawBody);
 
   // ON CONFLICT DO NOTHING: a provider retry of the same event returns no row.
@@ -35,6 +44,22 @@ export async function receiveWebhook(input: ReceiveInput): Promise<{ duplicate: 
     tx.insert(webhookEvents).values({ source, idempotencyKey, payload }).onConflictDoNothing().returning({ id: webhookEvents.id }),
   );
   if (!row) return { duplicate: true };
+
+  if (processNow) {
+    const run = () =>
+      processWebhook(ctx, row.id).catch(() =>
+        // Failed (row marked "failed", visible in Failed events): let QStash retry it.
+        enqueue("process-webhook", { tenantId: ctx.tenantId, webhookEventId: row.id }, { deduplicationId: `wh:${row.id}` }).catch((err) =>
+          log.warn("call webhook failed and could not be queued; Replay it from Failed events", { tenant: ctx.tenantSlug, source, err }),
+        ),
+      );
+    try {
+      after(run);
+    } catch {
+      await run(); // outside a request (tests, scripts)
+    }
+    return { duplicate: false };
+  }
 
   try {
     await enqueue("process-webhook", { tenantId: ctx.tenantId, webhookEventId: row.id }, { deduplicationId: `wh:${row.id}` });

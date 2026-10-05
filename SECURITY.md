@@ -34,6 +34,9 @@ How the AM2PM CRM protects client data, what is already enforced in code, and wh
 | Password theft from the database | scrypt (N=16384, r=8, p=1, 16-byte salt) per password; only hashes stored; constant-time compare | **Enforced** |
 | Password guessing / account enumeration | 5 failures per email and 300 per IP per 15 min (Redis; high per-IP ceiling because a whole office shares one IP) → 429; same error for unknown email and wrong password; dummy hash on unknown emails | **Enforced** |
 | Credential stuffing beyond the login throttle | Optional TOTP 2FA, IP allowlist for agents, Google sign-in | **Planned** (T3.10, T3.12) |
+| SQL injection | Every query goes through Drizzle with values as bound parameters; `sql.raw` / `sql.unsafe` banned by ESLint (`no-restricted-syntax`, 2026-10-05); LIKE input escaped (`escapeLike`); sort fields and filter keys are allowlists / regex-checked and passed as parameters; Zod on every input. Tests: hostile search, filter and custom-field values return nothing and leave the table intact (`tests/integration/leads-list.test.ts`) | **Enforced** |
+| Abuse of the app by a signed-in person or script | One per-person bucket, 300 requests/min, shared by every server action (Console, Leads, Setup, Calls, notifications, workspace switch) and session calls to `/api/v1` / GraphQL → 429 (`lib/http/rate-limit.ts`); "Sync now" max 2/min per workspace; API keys 600/min per key and 1,200/min per workspace | **Enforced** (2026-10-05) |
+| Guessing webhook keys / probing workspace slugs | Wrong key, unknown workspace or unknown source counts against the caller's IP; 30 in 15 min → 429 before any database work, on both lead-source and telephony webhooks | **Enforced** (2026-10-05) |
 | Webhook floods | Vercel Firewall rate limits on `/api/hooks/*` (e.g. 300/min per source) | **Planned** (T3.12) |
 | Recording links shared publicly | Short-lived signed URLs; every play audit-logged | **Planned** (T1.39) |
 | Insider misuse | Append-only `audit_logs` (app role cannot UPDATE/DELETE); two-person rule for restores; fresh TOTP for backup download | **Partly** — table + grants enforced; writers and backup UI planned |
@@ -74,11 +77,14 @@ Verified: `tests/integration/postgres.test.ts` (PGlite) and a live check on Neon
 
 - A Super Admin can change any role's permissions for their own workspace (Setup → Roles, DESIGN.md §7). "Super Admin only" is checked in code (`lib/admin/roles.ts`), not read from the matrix, so an edited matrix can never grant someone the editor.
 - Super Admin's own column is locked (no lock-out); edits for it, for unknown areas or with letters outside `VCEDAXI` are rejected on save and ignored on load.
-- Edits live in `role_permissions` under RLS, so one workspace's matrix can't be read or written from another. Every change writes `role_permission.changed` (before → after) to the audit log.
+- Edits live in `role_permissions` under RLS, so one workspace's matrix can't be read or written from another. A Save is one transaction (all cells or none); every changed cell writes `role_permission.changed` (before → after) to the audit log.
 - Every check uses the actor's grants for the current workspace, loaded per request for sessions and API keys alike; a removed permission takes effect on the editor's instance at once and on others within 30 s.
 - Data scope (own / process / tenant) and phone masking stay fixed per role; the matrix can't widen them.
+- Module access switches (`screen.<name>`): a module needs its switch on AND the permissions to use it. Switching one on also grants View on the area it needs (one audited save, Super Admin only), never more. Hiding a module also blocks its URL; the APIs behind it stay governed by the matrix.
+- **No probing by URL** (2026-10-05): a module page or Setup tab the person may not open returns **404**, the same page and status as a URL that doesn't exist (`requirePage` → `notFound()`, Setup `?tab=` checked against `tabVisible`). Record links work the same way: a lead (`/console?lead=…`, `/leads/{id}`) or process (`/admin?tab=outcomes&process=…`) from another workspace or outside the person's scope is a 404, never a silent jump to some other record. A URL never reveals whether a module or record exists or is hidden. Not signed in still goes to /login. Verified: `tests/integration/leads-list.test.ts` (another workspace's / another agent's lead).
+- Client, trainer, HR and accounts have process scope: if granted lead/call rights they see only the processes they're mapped to, never the whole workspace.
 
-Verified: `tests/integration/roles.test.ts` (Super Admin only, locked column, audit, workspace isolation), `tests/rbac.test.ts` (edits reach checks, bad edits ignored).
+Verified: `tests/integration/roles.test.ts` (Super Admin only, locked column, audit, workspace isolation), `tests/rbac.test.ts` (edits reach checks, bad edits ignored, module access hides and can't widen).
 
 ## 4. Secrets management
 

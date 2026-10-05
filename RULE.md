@@ -35,7 +35,7 @@ These rules apply to every change. A PR that breaks one is not merged. Why each 
 
 ## 3. Serverless and queues
 
-1. Webhook routes do only: verify → insert `webhook_events` → publish to QStash → return 200. No business logic inline.
+1. Webhook routes do only: verify → insert `webhook_events` → publish to QStash → return 200. No business logic inline. Exception (2026-10-05, MEMORIE.md): **call** webhooks are processed right after the 200 via `after()` (`processNow`) because the agent's live stepper waits on them; still stored first, and a failure is queued to QStash for retries.
 2. No function runs longer than ~60 s; fan out via QStash or save a cursor and re-queue.
 3. Every job handler is **idempotent**: QStash delivers at least once and retries count as messages.
 4. `/api/jobs/*` verifies the QStash signature; `/api/cron/*` verifies `CRON_SECRET`. Reject otherwise.

@@ -7,6 +7,7 @@
  */
 import { z, ZodError } from "zod";
 import { getSession, type SessionContext } from "@/lib/auth/session";
+import { limitPerson } from "@/lib/http/rate-limit";
 import { ApiError } from "@/lib/http/errors";
 import { log } from "@/lib/log";
 import { getLeadDetail, getQueue } from "@/lib/agent/queue";
@@ -27,6 +28,7 @@ async function run<T>(fn: (ctx: SessionContext) => Promise<T>): Promise<Result<T
   const ctx = await getSession();
   if (!ctx) return { ok: false, error: "Your session has ended. Sign in again." };
   try {
+    await limitPerson(ctx);
     return { ok: true, data: await fn(ctx) };
   } catch (err) {
     if (err instanceof ApiError) return { ok: false, error: err.message };

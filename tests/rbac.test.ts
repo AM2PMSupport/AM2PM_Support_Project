@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { can, canSeeFullPhone, defaultGrants, effectiveGrants, homeFor, landingAfterSwitch, leadScope, navFor, normalizeActions, permissionMatrix } from "@/lib/auth/rbac";
+import { can, canSeeFullPhone, defaultGrants, effectiveGrants, homeFor, landingAfterSwitch, leadScope, navFor, normalizeActions, permissionMatrix, screenMatrix } from "@/lib/auth/rbac";
 
 describe("permission matrix (DESIGN.md §7)", () => {
   it("matches key cells", () => {
@@ -17,7 +17,7 @@ describe("permission matrix (DESIGN.md §7)", () => {
     expect(leadScope("agent")).toBe("own");
     expect(leadScope("manager")).toBe("process");
     expect(leadScope("admin")).toBe("tenant");
-    expect(leadScope("client")).toBe("none");
+    expect(leadScope("client")).toBe("process"); // only matters once Setup grants it lead rights
   });
 
   it("masks phones for agents, coordinators, clients and trainers", () => {
@@ -27,10 +27,10 @@ describe("permission matrix (DESIGN.md §7)", () => {
   });
 
   it("builds the nav and home page per role", () => {
-    expect(navFor({ role: "agent" })).toEqual(["console", "leads", "calls"]);
-    expect(navFor({ role: "manager" })).toEqual(["console", "leads", "calls", "dashboard", "admin"]);
-    expect(navFor({ role: "super_admin" })).toEqual(["console", "leads", "calls", "dashboard", "admin"]);
-    expect(navFor({ role: "trainer" })).toEqual(["dashboard"]);
+    expect(navFor({ role: "agent" })).toEqual(["console", "leads", "calls", "soon"]);
+    expect(navFor({ role: "manager" })).toEqual(["console", "leads", "calls", "dashboard", "admin", "soon"]);
+    expect(navFor({ role: "super_admin" })).toEqual(["console", "leads", "calls", "dashboard", "admin", "soon"]);
+    expect(navFor({ role: "trainer" })).toEqual(["dashboard", "soon"]);
     expect(homeFor({ role: "trainer" })).toBe("/dashboard");
     expect(homeFor({ role: "client" })).toBe("/dashboard");
     expect(homeFor({ role: "agent" })).toBe("/console");
@@ -43,6 +43,7 @@ describe("landingAfterSwitch", () => {
     expect(landingAfterSwitch({ role: "admin" }, "/calls")).toBe("/calls");
     expect(landingAfterSwitch({ role: "admin" }, "/dashboard")).toBe("/dashboard");
     expect(landingAfterSwitch({ role: "agent" }, "/leads")).toBe("/leads");
+    expect(landingAfterSwitch({ role: "client" }, "/soon/reports")).toBe("/soon");
   });
 
   it("drops filters and the open lead (old workspace ids), keeps the Setup tab", () => {
@@ -69,8 +70,8 @@ describe("new roles: HR, Auditor, Accounts (2026-10-05)", () => {
   it("HR manages employee profiles and opens Setup, no leads", () => {
     expect(can({ role: "hr" }, "employees", "E")).toBe(true);
     expect(can({ role: "hr" }, "leads", "V")).toBe(false);
-    expect(leadScope("hr")).toBe("none");
-    expect(navFor({ role: "hr" })).toEqual(["admin"]);
+    expect(leadScope("hr")).toBe("process");
+    expect(navFor({ role: "hr" })).toEqual(["admin", "soon"]);
     expect(homeFor({ role: "hr" })).toBe("/admin");
   });
 
@@ -138,5 +139,33 @@ describe("workspace permission edits (Setup → Roles)", () => {
     expect(reports.grants.trainer).toBe("VX");
     expect(reports.edited.trainer).toBe(true);
     expect(reports.edited.admin).toBeUndefined();
+  });
+});
+
+describe("module access (Setup → Roles)", () => {
+  const off = (role: string, screen: string) => ({ role, module: `screen.${screen}`, actions: "" });
+
+  it("hides a switched-off module and moves home to the next one", () => {
+    const grants = effectiveGrants("agent", [off("agent", "console"), off("agent", "soon")]);
+    expect(navFor({ role: "agent", grants })).toEqual(["leads", "calls"]);
+    expect(homeFor({ role: "agent", grants })).toBe("/no-access");
+    expect(landingAfterSwitch({ role: "agent", grants }, "/console")).toBe("/no-access");
+  });
+
+  it("can't open a module the permissions don't support, and Super Admin is fixed", () => {
+    const grants = effectiveGrants("hr", []);
+    expect(navFor({ role: "hr", grants })).not.toContain("leads");
+    expect(effectiveGrants("super_admin", [off("super_admin", "admin")])["screen.admin"]).toBe("V");
+  });
+
+  it("reports on / available / edited per role", () => {
+    const row = screenMatrix([off("manager", "calls")]).find((r) => r.screen === "calls")!;
+    expect(row.on.manager).toBe(false);
+    expect(row.edited.manager).toBe(true);
+    expect(row.available.manager).toBe(true);
+    expect(row.available.hr).toBe(false);
+    expect(row.on.agent).toBe(true);
+    const floor = screenMatrix().find((r) => r.screen === "dashboard")!;
+    expect([floor.on.agent, floor.available.agent, floor.edited.agent]).toEqual([false, true, undefined]); // off by default, not an edit
   });
 });

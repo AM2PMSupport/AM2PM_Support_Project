@@ -21,11 +21,13 @@ import { grantsFor } from "@/lib/auth/grants";
 import { withTenant, isUuid } from "@/lib/db/tenant";
 import { writeAudit } from "@/lib/audit";
 import { log } from "@/lib/log";
+import { limitPerson } from "@/lib/http/rate-limit";
 
 export async function notificationsAction() {
   const ctx = await getSession();
   if (!ctx) return { unread: 0, items: [] };
   try {
+    await limitPerson(ctx);
     return await myNotifications(ctx);
   } catch {
     return { unread: 0, items: [] };
@@ -63,6 +65,7 @@ export async function switchWorkspaceAction(tenantId: string, from?: string): Pr
   if (!ctx) return { ok: false, error: "Your session has ended. Sign in again." };
   if (!isUuid(tenantId)) return { ok: false, error: "Unknown workspace" };
   try {
+    await limitPerson(ctx);
     const mine = await membershipsOf(ctx.accountId);
     let m = mine.find((x) => x.tenantId === tenantId);
     let entered = false;

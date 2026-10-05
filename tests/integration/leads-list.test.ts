@@ -341,3 +341,28 @@ describe("column, system and custom-field filters (shared by Leads + console)", 
     expect(parseCustomFilters({ "cf_x; drop table leads": "~a", cf_ok: "n:abc..", cf_d: "d:yesterday.." })).toEqual([{ key: "ok", op: "num", min: undefined, max: undefined }, { key: "d", op: "date", from: undefined, to: undefined }]);
   });
 });
+
+describe("lead links across workspaces / scopes (console ?lead=, /leads/{id} → 404)", () => {
+  it("another workspace's lead never opens — the console would get a different lead, so the page 404s", async () => {
+    const { getConsole, getLeadDetail } = await import("@/lib/agent/queue");
+    const ankit = ids[0]!; // a lead of workspace "list-t"
+    expect((await getConsole(admin, ankit)).lead?.id).toBe(ankit);
+    expect((await getConsole(other, ankit)).lead?.id).not.toBe(ankit);
+    await expect(getLeadDetail(other, ankit)).rejects.toMatchObject({ status: 404 });
+    // Same workspace, out of scope: ids[0] was moved to agent B above, so agent A can't open it.
+    expect((await getConsole(agentA, ankit)).lead?.id).not.toBe(ankit);
+  });
+});
+
+describe("SQL injection (SECURITY.md §2)", () => {
+  it("hostile search / filter / custom-field values are data, never SQL", async () => {
+    const before = (await listLeads(admin, {})).total;
+    const evil = "x'); drop table leads; --";
+    expect((await listLeads(admin, { q: evil })).total).toBe(0);
+    expect((await listLeads(admin, { q: "Lead%" })).total).toBe(0); // "%" is a literal, not a LIKE wildcard (names are "Lead A0"…)
+    expect((await listLeads(admin, { cf_city: `~${evil}` })).total).toBe(0);
+    await expect(listLeads(admin, { sort: "name; drop table leads" as never })).rejects.toThrow(); // sort is an allowlist
+    expect((await listLeads(admin, {})).total).toBe(before); // table intact
+  });
+});
+

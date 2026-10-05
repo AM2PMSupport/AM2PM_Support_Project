@@ -274,6 +274,10 @@ Features the owner asked for while building. Each is live unless marked otherwis
 | 2026-10-05 | Scale hardening for 200–300 clients / 500–600 users (code review): background jobs time-boxed and fair per client, call sync in turn (or one job per client with QUEUE_FANOUT=1 on paid QStash), SLA alerts once, chunked clean-up, office-safe login limit, API limits per workspace and per person, lighter console/bell/Floor polling. Paid QStash + load test still needed before go-live | 1 | ✅ Done |
 | 2026-10-05 | Load test tooling (`scripts/loadtest`): isolated Neon branch, local QStash/Redis stand-ins, 4 app instances, simulated agents + webhooks. First run: free QStash = ~2–4 agents; app fine to ~150 agents from a laptop, limited by laptop→Singapore latency beyond that | 1 | ✅ Done |
 | 2026-10-05 | Automatic queue safety net: if QStash refuses messages (quota used up, plan lapsed, outage) the app switches to backup mode by itself — webhooks still accepted and processed, leads assigned, fan-out off, timer work driven by page views and daily crons — and Super Admins get an alert + banner | 1 | ✅ Done |
+| 2026-10-05 | Security: SQL injection guard (lint ban on raw SQL + tests) and rate limits on every screen action, Sync now and webhook key guessing | 1 | ✅ Done |
+| 2026-10-05 | Security: opening a module, Setup tab, lead or process by URL without permission (another workspace, someone else's lead) shows a 404 page (same as a page that doesn't exist), with a funny AM2PM clock logo | 1 | ✅ Done |
+| 2026-10-05 | Module access: Setup → Roles has a grid to choose which modules (Console, Leads, Calls, Floor, Setup, Coming soon) each role sees in this workspace; hidden modules can't be opened by URL either. Any role can be given any module (adds the View it needs). Default / Cancel / Save buttons; nothing changes until Save | 1 | ✅ Done |
+| 2026-10-05 | Coming-soon showcase: "Soon" in the sidebar opens a hub of 11 planned modules (reports, campaigns, workflows, attendance, employees, billing, client portal, training, backups, connectors, AI call quality), each with a preview on sample data and its plan | — | ✅ Done |
 
 ## How this file is kept up to date
 
@@ -288,6 +292,10 @@ Features the owner asked for while building. Each is live unless marked otherwis
 
 | Date | Change |
 | --- | --- |
+| 2026-10-05 | Owner request: protect against SQL injection; rate limiting |
+| 2026-10-05 | Owner request: no access by URL → 404 page with the AM2PM logo |
+| 2026-10-05 | Owner request: choose module access per role in Setup → Roles |
+| 2026-10-05 | Owner request: showcase every planned module under "Coming soon" |
 | 2026-10-05 | Owner request: automatic safety net for when the QStash plan lapses or the quota runs out |
 | 2026-10-05 | Owner request: load test on the free plan — run on an isolated branch; results in MEMORIE.md |
 | 2026-10-05 | Code review for 200–300 clients / 500–600 users: scale fixes done on the free QStash plan; paid QStash later via QUEUE_FANOUT=1 |

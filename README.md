@@ -43,7 +43,8 @@ Each folder owns one concern, so the project scales by **adding** folders and fi
 ```
 app/
   login/                                      sign-in (Auth.js in T1.11)
-  (app)/console · leads · dashboard · admin   agent console, leads + search, Floor dashboard, Setup — preview on sample data
+  (app)/console · leads · dashboard · admin   agent console, leads + search, Floor dashboard, Setup
+  (app)/soon                                  coming-soon showcase of planned modules (sample data)
   globals.css                                 design tokens (paper/ink, brand teal + orange)
   api/hooks/[tenant]/[source]/route.ts        lead-source webhooks: verify key → store → queue
   api/hooks/[tenant]/telephony/[provider]/    call webhooks (inbound + outbound), no SIP

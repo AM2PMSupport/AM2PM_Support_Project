@@ -205,7 +205,8 @@ export function LiveConsole({
   // Scale (500+ agents): the next poll is scheduled only after the previous one
   // finishes (no pile-up when the server is slow), an idle console doesn't poll
   // while its tab is hidden (it refreshes the moment it's shown again), and a
-  // live call is checked every 3 s (10 s when hidden).
+  // live call is checked every 1.5 s (10 s when hidden) — call webhooks are
+  // applied the moment they arrive (lib/webhooks/receive.ts processNow).
   useEffect(() => {
     const live = phase === "agent_ringing" || phase === "customer_ringing" || phase === "connected";
     let stopped = false;
@@ -249,7 +250,7 @@ export function LiveConsole({
           // Network blip: try again on the next round.
         }
         schedule();
-      }, live ? (hidden ? 10_000 : 3_000) : 20_000);
+      }, live ? (hidden ? 10_000 : 1_500) : 20_000);
     };
     const onVisible = () => {
       if (document.visibilityState !== "visible" || live) return;
@@ -300,7 +301,9 @@ export function LiveConsole({
   }, []);
 
   const outcome = lead?.outcomes.find((o) => o.id === picked) ?? null;
-  const canRecord = !!lead && lead.status === "open" && (phase === "ended" || noCall) && !saved;
+  // Outcome, note and callback can be filled (and saved) during the call too —
+  // the outcome lands on this call's interaction either way (lib/agent/outcome.ts).
+  const canRecord = !!lead && lead.status === "open" && (phase !== "idle" || noCall) && !saved;
   const canSave = canRecord && !!outcome && (outcome.category !== "callback" || !!when);
 
   function save() {
@@ -610,7 +613,7 @@ export function LiveConsole({
                     Record without a call
                   </button>
                 ) : (
-                  <span className="text-[11.5px] text-ink-3">{canRecord ? "Press 1–9, then Enter" : lead.status !== "open" ? "Lead is closed" : "Unlocks when the call ends"}</span>
+                  <span className="text-[11.5px] text-ink-3">{canRecord ? "Press 1–9, then Enter" : lead.status !== "open" ? "Lead is closed" : "Unlocks when you call"}</span>
                 )}
               </div>
               <div className="grid grid-cols-4 gap-1.5">

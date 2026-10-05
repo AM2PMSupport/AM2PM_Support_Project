@@ -291,6 +291,18 @@ describe("webhook intake", () => {
     expect(second.duplicate).toBe(true);
     expect(enqueued.filter((e) => e.job === "process-webhook")).toHaveLength(1);
   });
+
+  it("call webhooks (processNow) are processed at once, and only a failure goes to the queue", async () => {
+    const before = enqueued.length;
+    // Not a CallerDesk event (no status) → nothing to apply → done, no queue message.
+    await receiveWebhook({ ctx: A, source: "telephony:callerdesk", payload: { b: 1 }, rawBody: '{"b":1}', processNow: true });
+    const rows = await withTenant(A, (tx) => tx.select().from(s.webhookEvents).where(sql`${s.webhookEvents.payload}->>'b' = '1'`));
+    expect(rows.map((r) => r.status)).toEqual(["done"]);
+    expect(enqueued.length).toBe(before);
+    // Unknown provider → processing fails → queued for QStash retries.
+    await receiveWebhook({ ctx: A, source: "telephony:nope", payload: { c: 1 }, rawBody: '{"c":1}', processNow: true });
+    expect(enqueued.slice(before).map((e) => e.job)).toEqual(["process-webhook"]);
+  });
 });
 
 // Sanity: the app role really cannot bypass RLS.

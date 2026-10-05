@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { AudioLines, BarChart3, Headset, Settings2, UsersRound } from "lucide-react";
+import { AudioLines, BarChart3, Headset, LayoutGrid, Settings2, UsersRound } from "lucide-react";
 import { LogoMark } from "@/components/ui/logo";
 import type { AgentStatus } from "@/lib/ui/sample-data";
 import { STATUS_META } from "@/lib/ui/status";
@@ -63,6 +63,19 @@ export function Sidebar({
             </Link>
           );
         })}
+        {/* Planned modules showcase (lib/ui/coming-soon.ts); hideable per role in Setup → Roles. */}
+        {nav.includes("soon") && (
+        <Link
+          href="/soon"
+          className={`group relative mt-2 flex w-[60px] flex-col items-center gap-1 rounded-md border-t border-white/10 py-2.5 text-[10.5px] font-medium transition-colors ${
+            path.startsWith("/soon") ? "bg-white/[0.07] text-sheet" : "text-ink-4 hover:text-sheet"
+          }`}
+        >
+          {path.startsWith("/soon") && <span className="absolute left-[-8px] top-2 bottom-2 w-[3px] rounded-r bg-teal" />}
+          <LayoutGrid size={19} strokeWidth={1.7} />
+          Soon
+        </Link>
+        )}
       </nav>
 
       <div className="flex flex-col items-center gap-3">

@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 import { z, ZodError } from "zod";
 import { getSession, type SessionContext } from "@/lib/auth/session";
+import { limitPerson } from "@/lib/http/rate-limit";
 import { ApiError } from "@/lib/http/errors";
 import { log } from "@/lib/log";
 import { ViewInput, deleteView, saveView } from "@/lib/leads/views";
@@ -21,6 +22,7 @@ async function run<T>(fn: (ctx: SessionContext) => Promise<T>): Promise<ActionRe
   const ctx = await getSession();
   if (!ctx) return { ok: false, error: "Your session has ended. Sign in again." };
   try {
+    await limitPerson(ctx);
     const data = await fn(ctx);
     revalidatePath("/leads");
     return { ok: true, data };

@@ -132,7 +132,26 @@
 .brand-arc-outer { animation: brand-spin 2.4s linear infinite; }
 .brand-arc-inner { animation: brand-spin-back 1.6s linear infinite; }
 .brand-check { stroke-dasharray: 34; animation: brand-check 1.8s ease-in-out infinite; }
+/* 404 page (app/not-found.tsx): the logo-clock is dizzy, its hand droops and spins. */
+@keyframes lost-wobble {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg); }
+}
+@keyframes lost-hand {
+  0%, 60% { transform: rotate(0deg); }
+  80% { transform: rotate(-200deg); }
+  100% { transform: rotate(-360deg); }
+}
+@keyframes lost-drop {
+  0% { transform: translateY(-4px); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translateY(10px); opacity: 0; }
+}
+.lost-clock { transform-origin: 50% 60%; animation: lost-wobble 2.6s ease-in-out infinite; }
+.lost-hand { transform-box: view-box; transform-origin: 50% 50%; animation: lost-hand 4s ease-in-out infinite; }
+.lost-drop { animation: lost-drop 2.6s ease-in infinite; }
 @media (prefers-reduced-motion: reduce) {
+  .lost-clock, .lost-hand, .lost-drop { animation: none; }
   .live-dot::after { animation: none; }
   .skeleton { animation: none; }
   .brand-arc-outer, .brand-arc-inner, .brand-check { animation: none; stroke-dasharray: none; }

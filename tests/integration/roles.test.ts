@@ -13,9 +13,9 @@ import type { TenantContext } from "@/lib/tenancy/context";
 
 vi.mock("@/lib/queue/qstash", () => ({ enqueue: vi.fn(async () => "msg"), verifyQStash: vi.fn() }));
 
-const { setRolePermission } = await import("@/lib/admin/roles");
+const { setRolePermission, setRolePermissions } = await import("@/lib/admin/roles");
 const { grantsFor, workspaceEdits } = await import("@/lib/auth/grants");
-const { can } = await import("@/lib/auth/rbac");
+const { can, navFor } = await import("@/lib/auth/rbac");
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -75,6 +75,33 @@ describe("role permission edits", () => {
     expect(await withTenant(a, (tx) => tx.select().from(s.rolePermissions))).toEqual([]);
     const rowsB = await withTenant(b, (tx) => tx.select().from(s.rolePermissions));
     expect(rowsB.map((r) => [r.role, r.module, r.actions])).toEqual([["agent", "leads", ""]]);
+  });
+
+  it("switching a module on for a role also grants View on the area it needs", async () => {
+    await setRolePermission(superA, { role: "hr", module: "screen.leads", actions: "V" });
+    const g = await grantsFor(a, "hr");
+    expect(can({ role: "hr", grants: g }, "leads", "V")).toBe(true);
+    expect(navFor({ role: "hr", grants: g })).toContain("leads");
+    // Switching it off again leaves the granted permission (the matrix is changed separately).
+    await setRolePermission(superA, { role: "hr", module: "screen.leads", actions: "" });
+    expect(navFor({ role: "hr", grants: await grantsFor(a, "hr") })).not.toContain("leads");
+    await withTenant(a, (tx) => tx.delete(s.rolePermissions));
+  });
+
+  it("Save writes a batch in one go, and a bad cell saves nothing", async () => {
+    await setRolePermissions(superA, [
+      { role: "agent", module: "screen.dashboard", actions: "V" },
+      { role: "manager", module: "leads", actions: "VX" },
+    ]);
+    const rows = await withTenant(a, (tx) => tx.select().from(s.rolePermissions));
+    expect(rows.map((r) => [r.role, r.module, r.actions]).sort()).toEqual([["agent", "screen.dashboard", "V"], ["manager", "leads", "VX"]]);
+
+    await expect(setRolePermissions(superA, [{ role: "manager", module: "leads", actions: "VCEAX" }, { role: "super_admin", module: "leads", actions: "" }])).rejects.toMatchObject({ status: 400 });
+    expect(await withTenant(a, (tx) => tx.select().from(s.rolePermissions))).toHaveLength(2);
+
+    // "Default" = every cell back to its default → no rows left.
+    await setRolePermissions(superA, [{ role: "agent", module: "screen.dashboard", actions: "" }, { role: "manager", module: "leads", actions: "VCEAX" }]);
+    expect(await withTenant(a, (tx) => tx.select().from(s.rolePermissions))).toEqual([]);
   });
 
   it("rejects letters outside VCEDAXI", async () => {

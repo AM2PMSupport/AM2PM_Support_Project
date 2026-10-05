@@ -42,8 +42,7 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
   const scope = leadScope(ctx.actor.role);
   const uid = ctx.actor.userId;
   // Process filter for non-admin roles (process-scoped).
-  const procFilter = (col: string): SQL =>
-    scope === "tenant" ? sql`true` : sql`${sql.raw(col)} in (select process_id from user_processes where user_id = ${uid})`;
+  const procFilter = (col: SQL): SQL => (scope === "tenant" ? sql`true` : sql`${col} in (select process_id from user_processes where user_id = ${uid})`);
   const dayStart = sql`(date_trunc('day', now() at time zone ${tz}) at time zone ${tz})`;
 
   const one = (q: SQL) => withTenantRead(ctx, async (tx) => ((await tx.execute(q)).rows[0] ?? {}) as Row);
@@ -52,19 +51,19 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
   const kQ = one(sql`
       select
         extract(hour from now() at time zone ${tz})::int as h,
-        (select count(*) from leads l where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter("l.process_id")}) as leads_today,
-        (select count(*) from leads l where l.deleted_at is null and l.created_at >= ${dayStart} - interval '1 day' and l.created_at < now() - interval '1 day' and ${procFilter("l.process_id")}) as leads_yday,
-        (select count(*) from interactions i where i.type = 'call' and i.direction = 'outbound' and i.started_at >= ${dayStart} and ${procFilter("i.process_id")}) as attempted,
-        (select count(*) from interactions i where i.type = 'call' and i.status in ('answered','completed') and i.started_at >= ${dayStart} and ${procFilter("i.process_id")}) as connected,
-        (select avg(i.duration_sec) from interactions i where i.type = 'call' and i.status in ('answered','completed') and i.started_at >= ${dayStart} and ${procFilter("i.process_id")}) as avg_talk,
-        (select count(*) from leads l where l.deleted_at is null and l.converted_at >= ${dayStart} and ${procFilter("l.process_id")}) as conv,
-        (select count(*) from leads l where l.deleted_at is null and l.converted_at >= ${dayStart} - interval '1 day' and l.converted_at < now() - interval '1 day' and ${procFilter("l.process_id")}) as conv_yday,
-        (select count(*) from callbacks c join leads l on l.id = c.lead_id where l.deleted_at is null and c.status = 'pending' and c.due_at < now() and ${procFilter("l.process_id")}) as overdue,
-        (select count(*) from leads l where l.deleted_at is null and l.assigned_to is null and l.status = 'open' and l.is_active and ${procFilter("l.process_id")}) as unassigned,
+        (select count(*) from leads l where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter(sql`l.process_id`)}) as leads_today,
+        (select count(*) from leads l where l.deleted_at is null and l.created_at >= ${dayStart} - interval '1 day' and l.created_at < now() - interval '1 day' and ${procFilter(sql`l.process_id`)}) as leads_yday,
+        (select count(*) from interactions i where i.type = 'call' and i.direction = 'outbound' and i.started_at >= ${dayStart} and ${procFilter(sql`i.process_id`)}) as attempted,
+        (select count(*) from interactions i where i.type = 'call' and i.status in ('answered','completed') and i.started_at >= ${dayStart} and ${procFilter(sql`i.process_id`)}) as connected,
+        (select avg(i.duration_sec) from interactions i where i.type = 'call' and i.status in ('answered','completed') and i.started_at >= ${dayStart} and ${procFilter(sql`i.process_id`)}) as avg_talk,
+        (select count(*) from leads l where l.deleted_at is null and l.converted_at >= ${dayStart} and ${procFilter(sql`l.process_id`)}) as conv,
+        (select count(*) from leads l where l.deleted_at is null and l.converted_at >= ${dayStart} - interval '1 day' and l.converted_at < now() - interval '1 day' and ${procFilter(sql`l.process_id`)}) as conv_yday,
+        (select count(*) from callbacks c join leads l on l.id = c.lead_id where l.deleted_at is null and c.status = 'pending' and c.due_at < now() and ${procFilter(sql`l.process_id`)}) as overdue,
+        (select count(*) from leads l where l.deleted_at is null and l.assigned_to is null and l.status = 'open' and l.is_active and ${procFilter(sql`l.process_id`)}) as unassigned,
         (select percentile_cont(0.5) within group (order by extract(epoch from (f.first_call - l.created_at)))
            from leads l
            join lateral (select min(i.started_at) as first_call from interactions i where i.lead_id = l.id and i.type = 'call' and i.direction = 'outbound') f on f.first_call is not null
-           where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter("l.process_id")}) as median_first
+           where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter(sql`l.process_id`)}) as median_first
     `);
 
   const byHourQ = many(sql`
@@ -72,7 +71,7 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
              count(*) filter (where i.direction = 'outbound') as attempted,
              count(*) filter (where i.status in ('answered','completed')) as connected
       from interactions i
-      where i.type = 'call' and i.started_at >= ${dayStart} and ${procFilter("i.process_id")}
+      where i.type = 'call' and i.started_at >= ${dayStart} and ${procFilter(sql`i.process_id`)}
       group by 1 order by 1`);
 
     // Each stage is a subset of the one before (a won lead was interested,
@@ -85,7 +84,7 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
                -- Any outcome other than no-answer/busy means the person was reached.
                l.last_disposition->>'category' in ('positive','negative','callback','converted','dnc') as reached,
                exists (select 1 from interactions i where i.lead_id = l.id and i.status in ('answered','completed')) as answered
-        from leads l where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter("l.process_id")})
+        from leads l where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter(sql`l.process_id`)})
       select count(*) as leads_in,
              count(*) filter (where assigned) as assigned,
              count(*) filter (where assigned and (answered or reached or interested)) as connected,
@@ -98,7 +97,7 @@ export async function getFloor(ctx: SessionContext): Promise<FloorData> {
              count(*) filter (where exists (select 1 from interactions i where i.lead_id = l.id and i.status in ('answered','completed'))) as connected_leads,
              count(*) filter (where l.status = 'won') as conversions,
              avg(extract(epoch from ((select min(i.started_at) from interactions i where i.lead_id = l.id and i.type = 'call' and i.direction = 'outbound') - l.created_at)) / 60) as avg_first_min
-      from leads l where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter("l.process_id")}
+      from leads l where l.deleted_at is null and l.created_at >= ${dayStart} and ${procFilter(sql`l.process_id`)}
       group by 1 order by 2 desc`);
 
   const agentsQ = many(sql`
