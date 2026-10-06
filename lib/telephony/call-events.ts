@@ -45,8 +45,9 @@ const MATCHABLE_CLOSED = [...OUTBOUND_TERMINAL].filter((s) => s !== "unknown");
 export const TERMINAL = new Set(["completed", "missed", "agent_no_answer", "busy", "no_answer", "failed"]);
 const PRESENCE_TTL = 4 * 60 * 60;
 
-export async function applyCallEvents(ctx: TenantContext, integration: Integration, events: NormalisedCallEvent[]): Promise<void> {
-  for (const ev of events) await applyOne(ctx, integration, ev);
+/** `source: "sync"` = rows from the 15-min call report: calls the CRM didn't place are expected there, so they're logged at info, not warn. */
+export async function applyCallEvents(ctx: TenantContext, integration: Integration, events: NormalisedCallEvent[], source: "webhook" | "sync" = "webhook"): Promise<void> {
+  for (const ev of events) await applyOne(ctx, integration, ev, source);
 }
 
 async function findCall(tx: Tx, provider: string, ev: NormalisedCallEvent): Promise<Interaction | undefined> {
@@ -142,11 +143,11 @@ async function createInboundCall(ctx: TenantContext, integration: Integration, e
   });
 }
 
-async function applyOne(ctx: TenantContext, integration: Integration, ev: NormalisedCallEvent): Promise<void> {
+async function applyOne(ctx: TenantContext, integration: Integration, ev: NormalisedCallEvent, source: "webhook" | "sync"): Promise<void> {
   let call = await withTenant(ctx, (tx) => findCall(tx, integration.provider, ev));
   if (!call && ev.direction === "inbound") call = await createInboundCall(ctx, integration, ev);
   if (!call) {
-    log.warn("call webhook matched no call", { tenant: ctx.tenantSlug, kind: ev.kind, direction: ev.direction });
+    (source === "sync" ? log.info : log.warn)(source === "sync" ? "call report row matched no CRM call" : "call webhook matched no call", { tenant: ctx.tenantSlug, kind: ev.kind, direction: ev.direction });
     return;
   }
   const found = call;

@@ -12,6 +12,7 @@ import {
   removeDidAction,
   rotateSourceKeyAction,
   rotateWebhookAction,
+  setCallSyncAction,
   saveCallerDeskAction,
   setSourceStatusAction,
 } from "@/app/(app)/admin/actions";
@@ -156,6 +157,10 @@ export interface TelephonyData {
   maskedWebhookUrl: string | null;
   webhookBaseIsLocal: boolean;
   webhookHealth: { lastAt: string | null; last24h: number; failed24h: number; lastError: string | null };
+  /** Scheduled 15-min call-report sync on/off. */
+  syncCalls: boolean;
+  /** Webhooks CallerDesk sent with a wrong key today (old URL still configured there). */
+  rejected: { today: number; lastAt: string | null };
   dids: { id: string; number: string; processName: string; direction: string; defaultForOutbound: boolean }[];
 }
 
@@ -223,6 +228,13 @@ export function TelephonyPanel({ data, processes, canEdit }: { data: TelephonyDa
           </div>
         )}
         {secret && <div className="mt-3"><SecretOnce label="Webhook URL with secret — paste it into CallerDesk" value={secret} onDone={() => setSecret(null)} /></div>}
+        {data.rejected.today > 0 && !secret && (
+          <div className="mt-3 rounded-md border border-ember/40 bg-ember/10 px-3 py-2.5 text-[12.5px] text-ember-ink">
+            <b>CallerDesk is using an old webhook URL.</b> {data.rejected.today} call event{data.rejected.today === 1 ? " was" : "s were"} refused today
+            {data.rejected.lastAt ? ` (last ${new Date(data.rejected.lastAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })})` : ""} because the key in the URL doesn’t match.
+            {canEdit ? " Click New URL, then paste the full URL into CallerDesk → Settings → Webhook (both the live-call and call-report webhooks)." : " Ask an admin to update the URL in CallerDesk."}
+          </div>
+        )}
 
         {data.connected && (
           <div className="mt-5 grid gap-4 border-t border-rule pt-4 md:grid-cols-2">
@@ -245,6 +257,26 @@ export function TelephonyPanel({ data, processes, canEdit }: { data: TelephonyDa
                 </p>
               )}
               {data.webhookHealth.lastError && <p className="mt-1 truncate font-mono text-[11.5px] text-ink-3" title={data.webhookHealth.lastError}>Last error: {data.webhookHealth.lastError}</p>}
+              <div className="mt-4">
+                <div className="eyebrow mb-1">Call report sync</div>
+                {canEdit ? (
+                  <Toggle
+                    checked={data.syncCalls}
+                    onChange={(v) =>
+                      startTransition(async () => {
+                        const r = await setCallSyncAction(v);
+                        setError(r.ok ? null : r.error);
+                      })
+                    }
+                    label={data.syncCalls ? "On — every 15 min" : "Off"}
+                  />
+                ) : (
+                  <span className="text-[13px]">{data.syncCalls ? "On — every 15 min" : "Off"}</span>
+                )}
+                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-4">
+                  Pulls CallerDesk’s call report to fill in results and recordings for calls whose webhook never arrived. Turn off if webhooks work reliably; “Sync now” on the Calls screen still works.
+                </p>
+              </div>
             </div>
             <div className="text-[12.5px] leading-relaxed text-ink-3">
               <div className="eyebrow mb-1">Set up in CallerDesk → Settings → Webhook</div>

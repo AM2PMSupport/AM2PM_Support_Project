@@ -19,7 +19,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronRight, Columns3, Eye, GripVertical, ListOrdered, Pencil, Phone, RotateCcw, SlidersHorizontal, StretchHorizontal, Trash2 } from "lucide-react";
 import { StageTag, Tag } from "@/components/ui/primitives";
 import { SkeletonRows } from "@/components/ui/skeletons";
-import { COLUMNS, SOURCE_LABEL, ago, age, relTime, type ColumnKey } from "@/components/leads/meta";
+import { COLUMNS, SOURCE_LABEL, ago, age, relTime } from "@/components/leads/meta";
+import { formatValue, type Person } from "@/components/leads/field-input";
+import type { FieldDef } from "@/lib/leads/layout";
 import type { LeadRow } from "@/lib/leads/list";
 
 export const DEFAULT_WIDTH: Record<string, number> = {
@@ -28,7 +30,8 @@ export const DEFAULT_WIDTH: Record<string, number> = {
 };
 
 export interface GridPrefs {
-  columns: ColumnKey[];
+  /** System column keys and custom-field columns (`cf:<key>`). */
+  columns: string[];
   widths: Record<string, number>;
   wrap: boolean;
 }
@@ -49,7 +52,14 @@ export function LeadsGrid({
   onEdit,
   onDelete,
   onRestore,
+  fieldColumns,
+  fieldDefs = [],
+  people = [],
 }: {
+  /** Setup → Lead layout: every visible field that can be a column, in layout order, with its label. */
+  fieldColumns?: { key: string; label: string }[];
+  fieldDefs?: FieldDef[];
+  people?: Person[];
   rows: LeadRow[];
   prefs: GridPrefs;
   onPrefs: (p: GridPrefs) => void;
@@ -67,7 +77,7 @@ export function LeadsGrid({
   onRestore: (row: LeadRow) => void;
 }) {
   const [menu, setMenu] = useState<null | "root" | "columns" | "pages" | "view">(null);
-  const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   // Scroll position per list URL (page + filters), so coming back from a lead
   // lands on the same rows. Per-tab sessionStorage; a blocked store just means top.
@@ -80,12 +90,16 @@ export function LeadsGrid({
     } catch {}
   }, []);
   const { columns, widths, wrap } = prefs;
-  const has = (k: ColumnKey) => columns.includes(k);
-  const LABEL = Object.fromEntries(COLUMNS.map((c) => [c.key, c.label])) as Record<ColumnKey, string>;
+  const has = (k: string) => columns.includes(k);
+  // Columns on offer = the lead layout's visible fields (system + custom) with their labels;
+  // a field hidden in the layout drops out of the grid too.
+  const available = fieldColumns ?? COLUMNS.map((c) => ({ key: c.key as string, label: c.label }));
+  const LABEL: Record<string, string> = Object.fromEntries(available.map((c) => [c.key, c.label]));
+  const defOf = new Map(fieldDefs.map((d) => [d.key, d]));
   const shownCols = columns.filter((k) => k in LABEL);
   // Manage Columns lists the visible ones in their order, then the hidden ones.
-  const menuCols = [...shownCols, ...COLUMNS.map((c) => c.key).filter((k) => !columns.includes(k))];
-  const move = (k: ColumnKey, to: number) => {
+  const menuCols = [...shownCols, ...available.map((c) => c.key).filter((k) => !columns.includes(k))];
+  const move = (k: string, to: number) => {
     const next = shownCols.filter((x) => x !== k);
     next.splice(Math.max(0, Math.min(to, next.length)), 0, k);
     onPrefs({ ...prefs, columns: next });
@@ -171,7 +185,7 @@ export function LeadsGrid({
                 Lead name
                 <span onMouseDown={(e) => startResize(e, "name")} title="Drag to resize" className="absolute top-1.5 right-0 bottom-1.5 w-1.5 cursor-col-resize rounded border-r-2 border-transparent group-hover/th:border-rule-strong hover:!border-teal-ink" />
               </th>
-              {shownCols.map((k) => th(k, LABEL[k], k === "callback" || k === "created" || k === "attempts"))}
+              {shownCols.map((k) => th(k, LABEL[k] ?? k, k === "callback" || k === "created" || k === "attempts"))}
               {recycleBin && <th className="px-3 py-2.5 font-medium whitespace-nowrap">Deleted</th>}
               {/* Filler: absorbs extra width on wide screens so columns keep their sizes. */}
               <th aria-hidden className="w-full" />
@@ -257,6 +271,11 @@ export function LeadsGrid({
                         return <td key={k} {...cell("city", `text-ink-2 ${bg}`)}>{l.city ?? <span className="text-ink-4">—</span>}</td>;
                       case "created":
                         return <td key={k} {...cell("created", `text-right font-mono text-[12px] text-ink-3 tnum ${bg}`)}>{age(l.createdAt, renderedAt)}</td>;
+                      default: {
+                        // Custom field column (cf:<key>).
+                        const v = formatValue(defOf.get(k.slice(3)), l.custom?.[k.slice(3)], people);
+                        return <td key={k} {...cell(k, `text-ink-2 ${bg}`)}>{v || <span className="text-ink-4">—</span>}</td>;
+                      }
                     }
                   })}
                   {recycleBin && <td className={`px-3 py-2.5 whitespace-nowrap text-ink-3 ${bg}`}>{l.deletedAt ? ago(l.deletedAt, renderedAt) : "—"}</td>}

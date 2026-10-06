@@ -6,6 +6,7 @@
  * Column choice and page size are remembered per viewer (localStorage);
  * selection drives the bulk bar (reassign / move stage).
  */
+import { defaultLayout } from "@/lib/leads/layout";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import { ArrowDownUp, ChevronLeft, ChevronRight, Columns3, Download, Filter, List, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
@@ -16,7 +17,7 @@ import { LeadsBoard } from "@/components/leads/leads-board";
 import { CreateLead } from "@/components/leads/create-lead";
 import { ProcessPicker } from "@/components/ui/process-picker";
 import { AppliedFilters } from "@/components/leads/applied-filters";
-import { COLUMNS, DEFAULT_COLUMNS, SORT_LABEL, type ColumnKey } from "@/components/leads/meta";
+import { COLUMNS, DEFAULT_COLUMNS, SORT_LABEL } from "@/components/leads/meta";
 import { bulkAssignAction, bulkStageAction, deleteLeadsAction, deleteViewAction, restoreLeadsAction, saveViewAction } from "@/app/(app)/leads/actions";
 import { classifyQuery } from "@/lib/leads/search-classify";
 import type { LeadRow } from "@/lib/leads/list";
@@ -48,8 +49,9 @@ function parsePrefs(raw: string): GridPrefs {
   try {
     const p = JSON.parse(raw) as Partial<GridPrefs>;
     // Order matters (the viewer's column order); drop unknown/duplicate keys from older versions.
+    // System columns, or custom-field columns (cf:<key>); the grid drops any the layout no longer offers.
     const known = new Set<string>(COLUMNS.map((c) => c.key));
-    const columns = Array.isArray(p.columns) ? [...new Set(p.columns.filter((k): k is ColumnKey => known.has(k)))] : DEFAULT_COLUMNS;
+    const columns: string[] = Array.isArray(p.columns) ? [...new Set(p.columns.filter((k) => known.has(k) || /^cf:[a-z0-9_]{1,40}$/.test(k)))] : DEFAULT_COLUMNS;
     return { columns, widths: p.widths ?? {}, wrap: !!p.wrap };
   } catch {
     return { columns: DEFAULT_COLUMNS, widths: {}, wrap: false };
@@ -329,6 +331,9 @@ export function LeadsWorkspace({
               // The list URL (page, filters, sort) rides along so "← Leads" returns to exactly this page.
               onEdit={(id) => router.push(`/leads/${id}${sp.toString() ? `?back=${encodeURIComponent(sp.toString())}` : ""}`)}
               onDelete={(l) => setConfirm({ ids: [l.id], label: l.name })}
+              fieldColumns={options.columns}
+              fieldDefs={options.fieldDefs}
+              people={options.people}
               onRestore={(l) => runBulk(async () => { const r = await restoreLeadsAction({ leadIds: [l.id] }); return r.ok ? { ok: true, data: { moved: r.data!.restored, skipped: r.data!.skipped } } : r; }, "Restored")}
               emptyText={recycleBin ? "The recycle bin is empty." : q ? `No leads match “${q}”. Search needs 2+ letters or 3+ digits.` : filtersOn ? "No leads match these filters." : "No leads here yet."}
             />
@@ -399,6 +404,9 @@ export function LeadsWorkspace({
           processes={options.processes}
           owners={options.owners}
           canPickOwner={can.assign}
+          layout={options.layout ?? defaultLayout([])}
+          fieldDefs={options.fieldDefs ?? []}
+          people={options.people ?? []}
           onClose={() => setCreating(false)}
           onCreated={() => startTransition(() => router.refresh())}
         />

@@ -7,9 +7,13 @@
  *                   can't get around the API cap through the UI's actions
  *   per API key / per workspace   lib/api/context.ts
  *   sign-in         app/api/auth/login/route.ts (5 failures / email, 300 / IP)
- *   webhooks        badWebhookKey*: an IP sending wrong keys is blocked for
- *                   15 min — public URLs can't be used to guess secrets or
- *                   hammer the database
+ *   webhooks        an IP probing UNKNOWN workspaces / sources is blocked for
+ *                   15 min. A wrong key for a KNOWN workspace never blocks:
+ *                   providers (CallerDesk) send every workspace's webhooks from
+ *                   the same IPs, so blocking by IP let one workspace's stale
+ *                   key refuse all workspaces (2026-10-06 incident). Those are
+ *                   counted per workspace instead (Setup → Telephony shows them);
+ *                   the keys are 24+ random bytes, so guessing isn't a risk
  *
  * Redis down → requests pass (fail open): a cache outage mustn't take the app down.
  */
@@ -40,17 +44,39 @@ export function clientIp(req: Request): string {
   return (req.headers.get("x-forwarded-for") ?? "").split(",")[0]!.trim() || "unknown";
 }
 
-const badKey = (req: Request) => `rl:webhook-bad:${sha256Hex(clientIp(req))}`;
+const probeKey = (req: Request) => `rl:webhook-probe:${sha256Hex(clientIp(req))}`;
 
-/** Before verifying a webhook: 429 if this IP has sent too many wrong keys lately. */
+/** Before any lookup: 429 if this IP has been probing unknown workspaces / sources. */
 export async function assertWebhookIpAllowed(req: Request): Promise<void> {
-  const n = await redis().get<number>(badKey(req)).catch(() => 0);
-  if ((n ?? 0) >= BAD_WEBHOOK_KEYS_PER_IP) throw new ApiError(429, "rate_limited", "Too many requests with a wrong key. Try again later.");
+  const n = await redis().get<number>(probeKey(req)).catch(() => 0);
+  if ((n ?? 0) >= BAD_WEBHOOK_KEYS_PER_IP) throw new ApiError(429, "rate_limited", "Too many requests for unknown endpoints. Try again later.");
 }
 
-/** After a webhook failed verification: count it against the IP. */
-export async function countBadWebhookKey(req: Request): Promise<void> {
-  const key = badKey(req);
+/** A webhook for a workspace / source that doesn't exist: counts against the IP. */
+export async function countWebhookProbe(req: Request): Promise<void> {
+  const key = probeKey(req);
   const n = await redis().incr(key).catch(() => 0);
   if (n === 1) await redis().expire(key, BAD_WEBHOOK_WINDOW_S).catch(() => undefined);
+}
+
+/** A wrong key for a real workspace: counted for that workspace today (shown in Setup), never blocks. */
+export async function countRejectedWebhook(tenantId: string, source: string): Promise<void> {
+  const key = `t:${tenantId}:hooks-rejected:${source}:${new Date().toISOString().slice(0, 10)}`;
+  const n = await redis().incr(key).catch(() => 0);
+  if (n === 1) await redis().expire(key, 3 * 86_400).catch(() => undefined);
+  await redis().set(`t:${tenantId}:hooks-rejected:${source}:last`, new Date().toISOString(), { ex: 3 * 86_400 }).catch(() => undefined);
+}
+
+/** Today's rejected count + last time, for Setup. */
+export async function rejectedWebhooks(tenantId: string, source: string): Promise<{ today: number; lastAt: string | null }> {
+  try {
+    const r = redis();
+    const [n, last] = await Promise.all([
+      r.get<number>(`t:${tenantId}:hooks-rejected:${source}:${new Date().toISOString().slice(0, 10)}`),
+      r.get<string>(`t:${tenantId}:hooks-rejected:${source}:last`),
+    ]);
+    return { today: Number(n ?? 0), lastAt: last ?? null };
+  } catch {
+    return { today: 0, lastAt: null }; // Redis down / not configured: Setup still loads
+  }
 }

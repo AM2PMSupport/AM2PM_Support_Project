@@ -9,6 +9,8 @@
  * The query input is the screen's URL params, so a saved filter is just
  * those params (lib/leads/views.ts).
  */
+import { layoutIn } from "@/lib/admin/layout";
+import { layoutColumns } from "@/lib/leads/layout";
 import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { contacts, customFieldDefinitions, leads, processes, users } from "@/lib/db/schema";
@@ -40,6 +42,8 @@ export interface LeadRow {
   lastActivityAt: string | null;
   createdAt: string;
   city: string | null;
+  /** Custom field values (Manage Columns can show any of them). */
+  custom: Record<string, unknown>;
   deletedAt: string | null;
 }
 
@@ -353,6 +357,7 @@ export async function listLeads(
       lastActivityAt: r.lastActivityAt ? r.lastActivityAt.toISOString() : null,
       createdAt: r.createdAt.toISOString(),
       city: typeof r.custom.city === "string" ? r.custom.city : null,
+      custom: r.custom,
       deletedAt: r.deletedAt ? r.deletedAt.toISOString() : null,
     })),
     // Forward: next exists if we fetched an extra row; prev exists if we came from a cursor.
@@ -395,12 +400,17 @@ export async function leadFilterOptions(ctx: SessionContext) {
       .limit(50);
     // Custom fields defined for leads (workspace-wide + per process), one entry per key.
     const defs = await tx
-      .select({ key: customFieldDefinitions.key, label: customFieldDefinitions.label, type: customFieldDefinitions.type, options: customFieldDefinitions.options })
+      .select({ key: customFieldDefinitions.key, label: customFieldDefinitions.label, type: customFieldDefinitions.type, options: customFieldDefinitions.options, required: customFieldDefinitions.required, processId: customFieldDefinitions.processId })
       .from(customFieldDefinitions)
       .where(and(eq(customFieldDefinitions.isActive, true), eq(customFieldDefinitions.entity, "lead")))
       .orderBy(customFieldDefinitions.sortOrder, customFieldDefinitions.label);
     const fields = [...new Map(defs.map((d) => [d.key, d])).values()];
-    return { stages, sources, owners, processes: procs, campaigns, outcomes, fields };
+    // Manage Columns offers every visible field of Setup → Lead layout (system + custom), in layout order.
+    const layout = await layoutIn(tx);
+    const columns = layoutColumns(layout, fields);
+    const people = fields.some((f) => f.type === "user") ? await tx.select({ id: users.id, name: users.name }).from(users).orderBy(users.name) : [];
+    // Create Lead: the layout + every definition (per process) to pick the chosen process's fields.
+    return { stages, sources, owners, processes: procs, campaigns, outcomes, fields, columns, people, layout, fieldDefs: defs };
   });
 }
 

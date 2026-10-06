@@ -148,5 +148,17 @@ export async function changeLoginEmail(accountId: string, tenantId: string, newE
   }
   const [taken] = await db.select({ id: accounts.id }).from(accounts).where(eq(accounts.email, e));
   if (taken) throw conflict("Another login already uses this email");
-  await db.update(accounts).set({ email: e }).where(eq(accounts.id, accountId));
+  // In any workspace this person belongs to, someone else may already be listed with that email.
+  const [clash] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(sql`lower(${users.email}) = ${e}`, sql`${users.accountId} is distinct from ${accountId}`, sql`${users.tenantId} in (select tenant_id from users where account_id = ${accountId})`))
+    .limit(1);
+  if (clash) throw conflict("Someone else in one of this person's workspaces already uses this email");
+  // The login IS the email: rename it and every workspace's member row together, or
+  // other workspaces keep listing an address that no longer signs in (2026-10-06).
+  await db.transaction(async (tx) => {
+    await tx.update(accounts).set({ email: e }).where(eq(accounts.id, accountId));
+    await tx.update(users).set({ email: e }).where(eq(users.accountId, accountId));
+  });
 }

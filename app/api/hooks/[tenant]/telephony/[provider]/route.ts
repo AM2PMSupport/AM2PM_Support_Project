@@ -16,7 +16,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { ApiError, handle, json, notFound, unauthorized } from "@/lib/http/errors";
 import { log } from "@/lib/log";
-import { assertWebhookIpAllowed, countBadWebhookKey } from "@/lib/http/rate-limit";
+import { assertWebhookIpAllowed, countRejectedWebhook, countWebhookProbe } from "@/lib/http/rate-limit";
 import { tenantBySlug } from "@/lib/platform-admin/tenants";
 import { telephonyAdapter } from "@/lib/telephony/registry";
 import { systemContext } from "@/lib/tenancy/context";
@@ -30,7 +30,7 @@ async function receive(req: Request, { params }: Ctx): Promise<Response> {
   const tenant = await tenantBySlug(slug);
   const adapter = telephonyAdapter(provider);
   if (!tenant || !adapter) {
-    await countBadWebhookKey(req);
+    await countWebhookProbe(req);
     throw notFound();
   }
   const ctx = systemContext(tenant);
@@ -42,7 +42,7 @@ async function receive(req: Request, { params }: Ctx): Promise<Response> {
       .where(and(eq(integrations.kind, "telephony"), eq(integrations.provider, provider), eq(integrations.status, "active"))),
   );
   if (!integration) {
-    await countBadWebhookKey(req);
+    await countWebhookProbe(req);
     throw notFound();
   }
 
@@ -72,7 +72,8 @@ async function receive(req: Request, { params }: Ctx): Promise<Response> {
       contentType: req.headers.get("content-type") ?? "",
       fields: Object.keys(parseWebhookBody(req, rawBody)).slice(0, 25),
     });
-    await countBadWebhookKey(req);
+    // Real workspace, wrong key (usually an old URL still in CallerDesk): counted for Setup, never blocks the IP.
+    await countRejectedWebhook(tenant.id, `telephony:${provider}`);
     throw unauthorized("Invalid webhook signature");
   }
 

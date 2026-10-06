@@ -246,7 +246,7 @@ export const integrations = pgTable(
     credentialsEnc: text("credentials_enc").notNull(),
     webhookSecretEnc: text("webhook_secret_enc"),
     config: jsonb("config")
-      .$type<{ rateLimitPerMin?: number; routingLookup?: { enabled: boolean; timeoutMs: number } }>()
+      .$type<{ rateLimitPerMin?: number; routingLookup?: { enabled: boolean; timeoutMs: number }; /** Telephony: 15-min call-report sync (fills missed webhooks, recordings). Default on. */ syncCalls?: boolean }>()
       .notNull()
       .default({}),
     status: text("status").$type<"active" | "paused" | "error">().notNull().default("active"),
@@ -625,7 +625,23 @@ export const teamMembers = pgTable(
   (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index("team_members_user").on(t.tenantId, t.userId)],
 );
 
-export type CustomFieldType = "text" | "number" | "dropdown" | "multiselect" | "date" | "boolean" | "phone" | "email";
+export type CustomFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "decimal"
+  | "currency"
+  | "percent"
+  | "dropdown"
+  | "radio"
+  | "multiselect"
+  | "date"
+  | "datetime"
+  | "boolean"
+  | "phone"
+  | "email"
+  | "url"
+  | "user";
 
 /** Per-tenant (optionally per-process) custom field definitions; values live in `custom` JSONB. */
 export const customFieldDefinitions = pgTable(
@@ -701,6 +717,24 @@ export const apiKeys = pgTable(
  * order. Super Admin's grants are fixed and never stored here. Edited only
  * by a Super Admin (lib/admin/roles.ts).
  */
+/**
+ * Lead layout (Setup → Lead layout, 2026-10-06): sections, field order,
+ * hidden fields and label overrides for system fields — one per workspace.
+ * Every lead screen renders from it (Console details, lead page, Create Lead,
+ * Manage Columns). Shape + rules: lib/leads/layout.ts (normalizeLayout).
+ */
+export const fieldLayouts = pgTable(
+  "field_layouts",
+  {
+    tenantId: tenantId(),
+    entity: text("entity").$type<"lead">().notNull(),
+    layout: jsonb("layout").$type<import("@/lib/leads/layout").Layout>().notNull(),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.entity] })],
+);
+
 export const rolePermissions = pgTable(
   "role_permissions",
   {
@@ -781,10 +815,19 @@ export const backupSnapshots = pgTable(
     files: jsonb("files").$type<Record<string, { rows: number; bytes: number; sha256: string; key: string }>>().notNull().default({}),
     sizeBytes: integer("size_bytes").notNull().default(0),
     error: text("error"),
+    /** Tenant-local day the snapshot belongs to (one cron snapshot per workspace per day). */
+    day: text("day"),
+    /** The snapshot's data key, AES-256-GCM under the master key (envelope encryption). */
+    keyEnc: text("key_enc"),
+    /** Where a run stopped (60 s limit): next table + last primary key; null when done. */
+    cursor: jsonb("cursor").$type<{ table: number; after: unknown[] | null; chunk: number } | null>(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("backup_snapshots_recent").on(t.tenantId, t.startedAt)],
+  (t) => [
+    index("backup_snapshots_recent").on(t.tenantId, t.startedAt),
+    uniqueIndex("backup_snapshots_cron_day").on(t.tenantId, t.day).where(sql`${t.trigger} = 'cron'`),
+  ],
 );
 
 // ------------------------------------------------------------------ attendance (Jibble, T2.18–T2.26)

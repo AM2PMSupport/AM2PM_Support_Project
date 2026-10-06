@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 const { fakeRedis } = await import("./helpers/db");
 const r = fakeRedis();
 vi.mock("@/lib/redis/client", () => ({ redis: () => r }));
-const { assertWebhookIpAllowed, countBadWebhookKey, limitPerson, PERSON_RATE_PER_MIN, rateLimit } = await import("@/lib/http/rate-limit");
+const { assertWebhookIpAllowed, countRejectedWebhook, countWebhookProbe, limitPerson, PERSON_RATE_PER_MIN, rateLimit, rejectedWebhooks } = await import("@/lib/http/rate-limit");
 
 const req = (ip: string) => new Request("https://x.test/api/hooks/t/s", { headers: { "x-forwarded-for": `${ip}, 10.0.0.1` } });
 
@@ -20,9 +20,18 @@ describe("rate limits (SECURITY.md §2)", () => {
     await expect(limitPerson({ tenantId: "t1", actor: { userId: "u2" } })).resolves.toBeUndefined();
   });
 
-  it("blocks an IP after 30 wrong webhook keys; other IPs unaffected", async () => {
-    for (let i = 0; i < 30; i++) await countBadWebhookKey(req("1.2.3.4"));
+  it("blocks an IP after 30 probes of unknown workspaces; other IPs unaffected", async () => {
+    for (let i = 0; i < 30; i++) await countWebhookProbe(req("1.2.3.4"));
     await expect(assertWebhookIpAllowed(req("1.2.3.4"))).rejects.toMatchObject({ status: 429 });
     await expect(assertWebhookIpAllowed(req("5.6.7.8"))).resolves.toBeUndefined();
+  });
+
+  it("a stale key for a REAL workspace never blocks the provider's IP (2026-10-06 incident); it's counted for Setup", async () => {
+    for (let i = 0; i < 100; i++) await countRejectedWebhook("t-a", "telephony:callerdesk");
+    await expect(assertWebhookIpAllowed(req("9.9.9.9"))).resolves.toBeUndefined();
+    const r = await rejectedWebhooks("t-a", "telephony:callerdesk");
+    expect(r.today).toBe(100);
+    expect(r.lastAt).toBeTruthy();
+    expect((await rejectedWebhooks("t-b", "telephony:callerdesk")).today).toBe(0);
   });
 });

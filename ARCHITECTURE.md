@@ -163,11 +163,11 @@ Optional routing lookup (phase 2, provider permitting): provider asks `POST /api
 | Stale-lead recycle | hourly | `rptStaleLeads` | Reassign leads untouched for N hours |
 | Scheduled imports | every 15 min | `syncMarketingToCalling` | Pull Sheet / IndiaMART / Justdial |
 | Daily rollup | 00:30 | report builders | `INSERT … ON CONFLICT DO UPDATE` into `daily_stats` |
-| Tenant backup | 01:30 | — | Encrypted per-client snapshot to R2 |
+| Tenant backup | 01:30 IST (Vercel cron `/api/cron/backups`, 20:00 UTC) + the tick continues unfinished ones | `runBackups` | Encrypted per-client snapshot to the separate private Blob store `am2pm-crm-backups` (built 2026-10-06) |
 | Retention purge | 02:00 | — | `purge-expired`: delete expired webhook_events / outbox / deliveries (no TTL in Postgres) |
 | Recording retention | 02:15 | — | Cold-store old recordings; run erasure requests |
 | Backup prune + verify | Sun 03:00 | — | Expire snapshots; restore-test one random tenant |
-| Manager digest | 09:00 | `runNotifications` | Hot leads, follow-ups due, disposition counts |
+| Manager digest | 09:00–12:00 workspace time, once a day, from the tick | `runDigests` (lib/platform-admin/digest.ts) | Per recipient in their scope: yesterday's leads / won / calls / callback compliance, today's callbacks due / overdue / unassigned / never called, hot leads, outcomes (built 2026-10-06; sends once a valid RESEND_API_KEY + verified domain exist) |
 | Agent weekly report | Mon 08:00 | `sendAllUserReports` | Per-agent summary |
 | Open-leads recount | 02:30 | — | `recount-open-leads`: fix `users.open_leads` drift |
 | Jibble attendance poll | every 5 min (tick part `attendance`) + on Attendance / Floor views via `after()` when the last poll is > 5 min old (crons are daily on Hobby) | — | Built 2026-10-06 (`syncAttendance`): one platform-wide sync at a time (Redis lock); clock events since the cursor − 10 min → `workforce_entries` (ON CONFLICT DO NOTHING) → each person's state; presence older than 10 min shows "unknown". Jibble has no webhooks |
@@ -215,7 +215,9 @@ Two layers, because a platform point-in-time restore rewinds the whole database 
 | 1 · Platform | Outage, corruption, bad migration | Neon point-in-time restore (history window up to 7 days on Launch; longer on Scale) and instant branches; weekly `pg_dump` to R2 in a second region | RPO minutes, RTO ~1 h |
 | 2 · Per client | Bad import, bulk delete, wrong reassignment, contract exit | Nightly logical export of every tenant table filtered by `tenant_id` | RPO 24 h (6 h premium), RTO < 1 h |
 
-**How a per-client backup runs on serverless**
+**Built 2026-10-06 (T1.43–T1.44)** — differences from the plan below: storage is a separate private **Vercel Blob** store `am2pm-crm-backups` (bom1, token `BACKUP_READ_WRITE_TOKEN`, owner decision; R2 later), one file per ≤ 5,000-row batch (`backups/{tenantId}/{day}-{snapshotId}/{table}.{n}.amb` = "AMB1" | iv | tag | AES-256-GCM(gzip(NDJSON))) instead of multipart files, the manifest is the snapshot row's `files` (rows, bytes, SHA-256, path), and the next run continues from `cursor` (tick / next cron) instead of a QStash re-queue. Tables = every table with `tenant_id` except `backup_snapshots`, `outbox`, `webhook_events`, `webhook_deliveries`, plus the workspace's `tenants` row, read on a replica under RLS. Unlike the plan, integration credentials and key hashes are kept (already encrypted / hashed; a restore needs them to keep telephony and API keys working). Code: `lib/platform-admin/backups.ts`, `lib/backups/format.ts`. Verified live on Neon: every workspace's leads read back = database.
+
+**How a per-client backup runs on serverless (original plan)**
 1. Cron 01:30 publishes one QStash message per tenant × table (or Backup now, max once a day).
 2. Worker reads rows in keyset-paginated batches of 5,000 (`where tenant_id = … and id > last`) with a multipart upload to R2; near the time limit it saves the last id in `backup_snapshots.cursor` and re-queues itself.
 3. Each file: JSON Lines (types preserved: UUIDs, timestamptz, JSONB) → gzip → AES-256-GCM with a per-tenant data key; data key encrypted by a master key (envelope). Deleting a tenant key = crypto-erasure.

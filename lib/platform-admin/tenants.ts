@@ -3,7 +3,7 @@
  * a TenantContext, so this reads the global `tenants` table directly
  * (allowed only in lib/platform-admin, RULE.md §1.4).
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { integrations, tenants, type Tenant } from "@/lib/db/schema";
 import { isUuid } from "@/lib/db/tenant";
 import { platformDb } from "@/lib/platform-admin/db";
@@ -33,12 +33,12 @@ export async function contextForTenantId(tenantId: string): Promise<{ ctx: Tenan
   return { ctx: systemContext(tenant), tenant };
 }
 
-/** Tenants with an active telephony integration (for the calls sync). */
+/** Tenants with an active telephony integration and the scheduled call sync switched on (Setup → Telephony). */
 export async function tenantsWithTelephony(): Promise<string[]> {
   const rows = await platformDb()
     .selectDistinct({ id: integrations.tenantId })
     .from(integrations)
     .innerJoin(tenants, eq(tenants.id, integrations.tenantId))
-    .where(and(eq(integrations.kind, "telephony"), eq(integrations.status, "active"), inArray(tenants.status, ["active", "trial"])));
+    .where(and(eq(integrations.kind, "telephony"), eq(integrations.status, "active"), inArray(tenants.status, ["active", "trial"]), sql`(${integrations.config}->>'syncCalls') is distinct from 'false'`));
   return rows.map((r) => r.id);
 }

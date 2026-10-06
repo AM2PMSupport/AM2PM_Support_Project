@@ -8,6 +8,7 @@
  * - Test call: rings the agent's own phone through the provider to prove
  *   the number works, then marks it verified.
  */
+import { rejectedWebhooks } from "@/lib/http/rate-limit";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { integrations, processes, telephonyDids, users, webhookEvents } from "@/lib/db/schema";
@@ -31,6 +32,8 @@ export function telephonyWebhookUrl(tenantSlug: string, secret: string) {
 
 export async function getTelephony(ctx: SessionContext) {
   requirePermission(ctx, "config", "V");
+  // Webhooks CallerDesk sent with a wrong key today (old URL still in CallerDesk) — Redis, outside the transaction.
+  const rejected = await rejectedWebhooks(ctx.tenantId, `telephony:${PROVIDER}`);
   return withTenant(ctx, async (tx) => {
     const [integration] = await tx.select().from(integrations).where(eq(integrations.kind, "telephony"));
     const dids = await tx
@@ -66,6 +69,9 @@ export async function getTelephony(ctx: SessionContext) {
       webhookBaseIsLocal: isLocalUrl(base),
       provider: integration?.provider ?? null,
       status: integration?.status ?? null,
+      /** Scheduled 15-min call-report sync (Setup toggle); default on. */
+      syncCalls: integration?.config?.syncCalls !== false,
+      rejected,
       hasWebhookSecret: !!integration?.webhookSecretEnc,
       maskedWebhookUrl: integration?.webhookSecretEnc ? telephonyWebhookUrl(ctx.tenantSlug, "••••••") : null,
       dids: dids.map((d) => ({ ...d.did, processName: d.processName })),
@@ -165,4 +171,18 @@ export async function testAgentPhone(ctx: SessionContext, userId: string) {
     await writeAudit(tx, ctx, { action: "user.phone_verified", entity: "user", entityId: userId });
   });
   return { ok: true };
+}
+
+/** Setup → Telephony: switch the scheduled 15-min call-report sync on or off ("Sync now" still works). */
+export async function setCallSync(ctx: SessionContext, on: boolean): Promise<void> {
+  requirePermission(ctx, "integrations", "E");
+  await withTenant(ctx, async (tx) => {
+    const [i] = await tx
+      .update(integrations)
+      .set({ config: sql`${integrations.config} || ${JSON.stringify({ syncCalls: on })}::jsonb` })
+      .where(eq(integrations.kind, "telephony"))
+      .returning({ id: integrations.id });
+    if (!i) throw notFound("Connect CallerDesk first");
+    await writeAudit(tx, ctx, { action: on ? "telephony.call_sync_on" : "telephony.call_sync_off", entity: "integration", entityId: i.id });
+  });
 }

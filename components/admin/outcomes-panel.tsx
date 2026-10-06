@@ -134,10 +134,10 @@ export function OutcomesPanel({
             <Field label="Field name"><Input value={fLabel} onChange={(e) => setFLabel(e.target.value)} placeholder="e.g. Budget" required /></Field>
             <Field label="Type">
               <Select value={fType} onChange={(e) => setFType(e.target.value as CustomFieldDefinition["type"])}>
-                {["text", "number", "dropdown", "multiselect", "date", "boolean", "phone", "email"].map((t) => <option key={t}>{t}</option>)}
+                {["text", "textarea", "number", "decimal", "currency", "percent", "dropdown", "radio", "multiselect", "date", "datetime", "boolean", "phone", "email", "url", "user"].map((t) => <option key={t}>{t}</option>)}
               </Select>
             </Field>
-            {(fType === "dropdown" || fType === "multiselect") && (
+            {(fType === "dropdown" || fType === "multiselect" || fType === "radio") && (
               <Field label="Options (comma separated)" className="col-span-2"><Input value={fOptions} onChange={(e) => setFOptions(e.target.value)} /></Field>
             )}
             <div className="col-span-2 flex items-center justify-between">

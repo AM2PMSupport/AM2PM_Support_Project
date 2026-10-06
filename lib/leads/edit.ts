@@ -16,6 +16,8 @@
  * released, lead_events + audit. Restore puts it back unless another open
  * lead now holds the same dedupe key.
  */
+import { layoutIn } from "@/lib/admin/layout";
+import { resolveLayout } from "@/lib/leads/layout";
 import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { callbacks, contacts, customFieldDefinitions, leadEvents, leads, processes, users } from "@/lib/db/schema";
@@ -46,7 +48,7 @@ export const EditLeadInput = z.object({
   campaign: z.string().trim().max(120).optional(),
   stage: z.string().trim().min(1).max(30).optional(),
   ownerId: z.uuid().nullable().optional(),
-  custom: z.record(z.string().max(60), z.string().max(500)).default({}),
+  custom: z.record(z.string().max(60), z.string().max(5000)).default({}), // 5000: multi-line fields
 });
 
 /** Data for the lead page form (app/(app)/leads/[id]). */
@@ -65,6 +67,8 @@ export async function getLeadForEdit(ctx: SessionContext, leadId: string) {
       .from(customFieldDefinitions)
       .where(and(eq(customFieldDefinitions.isActive, true), eq(customFieldDefinitions.entity, "lead"), or(eq(customFieldDefinitions.processId, r.lead.processId), isNull(customFieldDefinitions.processId))));
     const fullPhone = canSeeFullPhone(ctx.actor.role);
+    const layout = resolveLayout(await layoutIn(tx), fields);
+    const people = fields.some((f) => f.type === "user") ? await tx.select({ id: users.id, name: users.name }).from(users).where(eq(users.status, "active")).orderBy(users.name) : [];
     return {
       id: r.lead.id,
       name: r.contact.name ?? "",
@@ -82,6 +86,8 @@ export async function getLeadForEdit(ctx: SessionContext, leadId: string) {
       processName: r.processName,
       custom: Object.fromEntries(Object.entries(r.lead.custom).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : String(v ?? "")])),
       fields,
+      layout,
+      people,
     };
   });
 }

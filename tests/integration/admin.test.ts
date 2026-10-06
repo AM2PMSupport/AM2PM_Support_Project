@@ -20,7 +20,8 @@ const { createProcess, listProcesses, listDispositions, createDisposition } = aw
 const { createUser, resetUserPassword, listUsers, updateUser } = await import("@/lib/admin/users");
 const { createField, validateCustom, listFields } = await import("@/lib/admin/custom-fields");
 const { createSource } = await import("@/lib/admin/sources");
-const { saveCallerDesk, addDid, getTelephony } = await import("@/lib/admin/telephony");
+const { saveCallerDesk, addDid, getTelephony, setCallSync } = await import("@/lib/admin/telephony");
+const { tenantsWithTelephony } = await import("@/lib/platform-admin/tenants");
 const { verifyPassword } = await import("@/lib/auth/password");
 const { sha256Hex } = await import("@/lib/crypto");
 
@@ -145,6 +146,22 @@ describe("team", () => {
     await expect(updateUser(admin, a.id, { ...base, email: "x@evil.test" })).rejects.toThrow(/other workspaces/);
   });
 
+  it("a super admin renaming a multi-workspace login updates the email shown in EVERY workspace", async () => {
+    const base = { name: "Ravi K", role: "agent" as const, phone: "", did: "", shareWeight: 1, maxOpenLeads: 5, dailyQuota: null, skills: [], processIds: [], status: "active" as const };
+    const superA = { ...admin, actor: { ...admin.actor, role: "super_admin" as const } };
+    const superB = { ...other, actor: { ...other.actor, role: "super_admin" as const } };
+    const a = await createUser(superA, { ...base, email: "ravi.old@am2pm.test" });
+    const b = await createUser(superB, { ...base, email: "ravi.old@am2pm.test" });
+    await updateUser(superA, a.id, { ...base, email: "Ravi.New@am2pm.test" });
+    const emailIn = async (ctx: typeof admin, id: string) => (await listUsers(ctx)).find((u) => u.id === id)?.email;
+    expect(await emailIn(admin, a.id)).toBe("ravi.new@am2pm.test");
+    expect(await emailIn(other, b.id)).toBe("ravi.new@am2pm.test"); // was left as the old address before the fix
+    // Someone else in one of Ravi's workspaces already has the target email → refused, nothing renamed.
+    await createUser(superB, { ...base, name: "Other", email: "taken@am2pm.test" });
+    await expect(updateUser(superA, a.id, { ...base, email: "taken@am2pm.test" })).rejects.toThrow(/already uses this email/);
+    expect(await emailIn(other, b.id)).toBe("ravi.new@am2pm.test");
+  });
+
   it("stops an admin from creating a Super Admin, and rejects bad phones", async () => {
     const base = { name: "X Y", did: "", shareWeight: 1, maxOpenLeads: 5, dailyQuota: null, skills: [], processIds: [], status: "active" as const };
     await expect(createUser(admin, { ...base, email: "boss@example.com", role: "super_admin", phone: "" })).rejects.toThrow(/Super Admin/);
@@ -182,6 +199,18 @@ describe("lead sources & telephony", () => {
     const t = await getTelephony(admin);
     expect(t.dids[0]).toMatchObject({ number: "07971544878", number10: "7971544878" });
     expect(t.maskedWebhookUrl).toMatch(/\/callerdesk\/••••••$/);
+  });
+
+  it("the 15-min call-report sync can be switched off and on per workspace", async () => {
+    expect((await getTelephony(admin)).syncCalls).toBe(true);
+    expect(await tenantsWithTelephony()).toContain(admin.tenantId);
+    await setCallSync(admin, false);
+    expect((await getTelephony(admin)).syncCalls).toBe(false);
+    expect(await tenantsWithTelephony()).not.toContain(admin.tenantId); // scheduled sync skips it
+    await setCallSync(admin, true);
+    expect(await tenantsWithTelephony()).toContain(admin.tenantId);
+    const audit = await withTenant(admin, (tx) => tx.select({ a: s.auditLogs.action }).from(s.auditLogs));
+    expect(audit.map((x) => x.a)).toEqual(expect.arrayContaining(["telephony.call_sync_off", "telephony.call_sync_on"]));
   });
 });
 

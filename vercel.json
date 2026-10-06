@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/tick",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/backups",
+      "schedule": "0 20 * * *"
     }
   ]
 }

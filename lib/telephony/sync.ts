@@ -105,7 +105,7 @@ export async function syncCalls(
         continue;
       }
       try {
-        await applyCallEvents(ctx, integration, events);
+        await applyCallEvents(ctx, integration, events, "sync");
       } catch (err) {
         failed++; // e.g. an incoming call on a DID not mapped to a process
         failedNow.add(fp);

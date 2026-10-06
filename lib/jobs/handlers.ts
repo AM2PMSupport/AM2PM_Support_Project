@@ -12,6 +12,8 @@ import { contextForTenantId } from "@/lib/platform-admin/tenants";
 import { purgeExpired, recountOpenLeads, relayOutbox, requeueStuckWebhooks, sweepStuckCalls, sweepUnassigned } from "@/lib/platform-admin/sweeps";
 import { runCallbackReminders } from "@/lib/platform-admin/reminders";
 import { syncAttendanceIfStale } from "@/lib/platform-admin/attendance";
+import { runDigests } from "@/lib/platform-admin/digest";
+import { runBackups } from "@/lib/platform-admin/backups";
 import { runImportChunk } from "@/lib/imports/run";
 import { copyRecording } from "@/lib/telephony/recordings";
 import { syncCalls } from "@/lib/telephony/sync";
@@ -106,6 +108,10 @@ export const handlers: Handlers = {
   // Runs at :00, :05, … The 15-minute work goes with the ticks at :00/:15/:30/:45.
   // Parts run side by side and fail independently; a failed part is retried by
   // the next tick, so the tick itself always succeeds (no QStash retry storm).
+  backups: async () => {
+    log.info("backups", { result: await runBackups(Date.now() + TICK_BUDGET_MS) });
+  },
+
   tick: async () => {
     const deadline = Date.now() + TICK_BUDGET_MS;
     const quarter = new Date().getUTCMinutes() % 15 < 5;
@@ -113,6 +119,10 @@ export const handlers: Handlers = {
       ["callback-reminders", () => runCallbackReminders(new Date(), deadline)],
       // Jibble has no webhooks: poll clock events (people + leave on their own slower clocks).
       ["attendance", syncAttendanceIfStale],
+      // 09:00 manager digest per workspace timezone, once a day (T1.42).
+      ["digest", () => runDigests(deadline)],
+      // Continues snapshots the nightly cron couldn't finish within its 60 s (T1.43).
+      ["backups", () => runBackups(deadline)],
     ];
     if (quarter) {
       parts.push(

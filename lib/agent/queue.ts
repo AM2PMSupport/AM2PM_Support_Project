@@ -11,6 +11,8 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { contacts, leads, processes, userProcesses, users, type Interaction, type LeadEvent } from "@/lib/db/schema";
 import { withTenant, type Tx } from "@/lib/db/tenant";
 import { canSeeFullPhone, leadScope } from "@/lib/auth/rbac";
+import { layoutIn } from "@/lib/admin/layout";
+import { resolveLayout } from "@/lib/leads/layout";
 import type { SessionContext } from "@/lib/auth/session";
 import { leadScopeCondition } from "@/lib/leads/scope";
 import { leadFilterWhere, type LeadQueryInput } from "@/lib/leads/list";
@@ -206,6 +208,9 @@ async function detailIn(tx: Tx, ctx: SessionContext, leadId: string) {
     .where(and(eq(leads.id, leadId), leadScopeCondition(ctx)));
   if (!row) throw notFound("Lead not found");
   const { lead, contact, process, outcomes, fields, events, calls } = row;
+  // Sections + order from Setup → Lead layout; names for "User" fields.
+  const layout = resolveLayout(await layoutIn(tx), fields);
+  const people = fields.some((f) => f.type === "user") ? await tx.select({ id: users.id, name: users.name }).from(users).orderBy(users.name) : [];
 
   const timeline: TimelineEntry[] = [
     ...events.map((e) => ({
@@ -257,6 +262,8 @@ async function detailIn(tx: Tx, ctx: SessionContext, leadId: string) {
     attempts: lead.attempts,
     custom: lead.custom,
     fields,
+    layout,
+    people,
     outcomes,
     owner: row.owner ?? null,
     nextCallbackAt: row.nextCallbackAt ? iso(row.nextCallbackAt) : null,

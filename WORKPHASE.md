@@ -13,7 +13,7 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | Phase | Focus | Done | In progress | To do | Complete |
 | --- | --- | --- | --- | --- | --- |
 | [Phase 0](#phase-0--decisions-and-setup) | Decisions and setup | 3 | 2 | 5 | 40% |
-| [Phase 1](#phase-1--core-crm-weeks-16) | Core CRM (weeks 1–6) | 40 | 9 | 8 | 78% |
+| [Phase 1](#phase-1--core-crm-weeks-16) | Core CRM (weeks 1–6) | 42 | 10 | 5 | 82% |
 | [Phase 2](#phase-2--automation-weeks-710) | Automation (weeks 7–10) | 1 | 9 | 20 | 18% |
 | [Phase 3](#phase-3--reporting-client-portal-backups-weeks-1114) | Reporting, client portal, backups (weeks 11–14) | 2 | 2 | 15 | 16% |
 | [Phase 4](#phase-4--later-week-15) | Later (week 15+) | 0 | 0 | 8 | 0% |
@@ -21,8 +21,8 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 ## Next up (in order)
 
 1. **Confirm inbound calls end-to-end** with one real incoming call on a mapped DID (T1.38a) — then Phase 1 telephony is fully done.
-2. **Nightly per-client backups** (T1.43, T1.44) — needed before real client data grows.
-3. **Manager digest email** at 09:00 (T1.42) — Resend key is already in Vercel.
+2. **Owner: fix email** — create a new Resend API key and verify am2pmsupport.com in Resend; then the 09:00 manager digest (T1.42, built) starts on its own.
+3. **Backups page + restore** (T3.7, T3.8) — nightly backups run since 2026-10-06 (T1.43–T1.44); next is seeing them, downloading and restoring.
 4. **Spreadsheet migration script + pilot** (T1.45, T1.46) — needs 2–3 real crmv7 sheets from the owner (T0.8).
 5. **Google Sheet 15-min pull** (T1.27) as the bridge during migration.
 6. Teams screen (T1.13), Redis eligibility cache (T1.28), live-update stream (T1.40).
@@ -117,9 +117,9 @@ Live app: https://am2pmsupportproject.vercel.app · Code: https://github.com/AM2
 | T1.40 | 🟡 In progress | SSE `/api/v1/stream` (or 5 s poll of Redis counter) for new leads, inbound screen-pop and live call status | console polls every 2 s in a call / 20 s otherwise (incl. inbound screen-pop); SSE stream not built |
 | T1.47 | ✅ Done | Quick search: trigram + call-lookup indexes and `searchContacts()` done (on Neon); `GET /api/v1/search` + search box in the agent UI after sign-in | `GET /api/v1/leads?q=` + Leads screen + top-bar search |
 | T1.41 | ✅ Done | Conversion transaction (status won, converted_at, open_leads − 1, events) | — |
-| T1.42 | ⬜ To do | Email sender (Resend) + manager digest cron 09:00 | — |
-| T1.43 | ⬜ To do | Per-tenant backup worker: stream 5,000/batch, gzip, envelope AES-256-GCM, multipart to R2, cursor + re-queue, manifest | — |
-| T1.44 | ⬜ To do | `backup_policies`, `backup_snapshots`; nightly cron 01:30; `backup.completed/failed` alerts | — |
+| T1.42 | 🟡 In progress | Email sender (Resend) + manager digest cron 09:00 | Built 2026-10-06: Resend adapter `lib/providers/email/resend.ts` (idempotency key per digest), digest per recipient in their own scope (admins / supervisors / managers): yesterday's leads, reached, won/lost, calls, callback compliance; today's callbacks due, overdue, unassigned, never-called; hot leads; outcomes — sent 09:00–12:00 workspace time once a day from the tick. Waiting on the owner: a valid RESEND_API_KEY (the stored one is rejected) + am2pmsupport.com verified in Resend |
+| T1.43 | ✅ Done | Per-tenant backup worker: stream 5,000/batch, gzip, envelope AES-256-GCM, multipart to R2, cursor + re-queue, manifest | Done 2026-10-06: every tenant table (+ the workspace row) read on a replica under RLS in primary-key order, 5,000 rows per file, gzip + AES-256-GCM with a per-snapshot data key wrapped by the master key, into a SEPARATE private Blob store `am2pm-crm-backups` (owner chose Blob over R2); progress saved after each file, resumes next run; SHA-256 per file; verified live (leads read back = database) |
+| T1.44 | ✅ Done | `backup_policies`, `backup_snapshots`; nightly cron 01:30; `backup.completed/failed` alerts | Done 2026-10-06: one cron snapshot per workspace per day (unique index), Vercel cron `/api/cron/backups` 20:00 UTC = 01:30 IST + tick continues unfinished ones; retention from backup_policies (7 daily / 4 weekly / 3 monthly); `backup.completed` / `backup.failed` events; failure → in-app alert to Super Admins |
 | T1.45 | ⬜ To do | Migration script per spreadsheet: CRM_Calling, Marketing_Leads, CRM_WebhookLog, MissedCalls → tables; roster, dropdowns; Timeline History → `lead_events`; count reconciliation | — |
 | T1.46 | ⬜ To do | Pilot: migrate one process; run in parallel with the sheet | — |
 | T1.48 | ✅ Done | Roles HR, Auditor, Accounts; action I (import); per-workspace editable permissions (Setup → Roles, Super Admin only) | Owner request 2026-10-05 |
@@ -275,6 +275,8 @@ Features the owner asked for while building. Each is live unless marked otherwis
 | 2026-10-05 | Scale hardening for 200–300 clients / 500–600 users (code review): background jobs time-boxed and fair per client, call sync in turn (or one job per client with QUEUE_FANOUT=1 on paid QStash), SLA alerts once, chunked clean-up, office-safe login limit, API limits per workspace and per person, lighter console/bell/Floor polling. Paid QStash + load test still needed before go-live | 1 | ✅ Done |
 | 2026-10-05 | Load test tooling (`scripts/loadtest`): isolated Neon branch, local QStash/Redis stand-ins, 4 app instances, simulated agents + webhooks. First run: free QStash = ~2–4 agents; app fine to ~150 agents from a laptop, limited by laptop→Singapore latency beyond that | 1 | ✅ Done |
 | 2026-10-05 | Automatic queue safety net: if QStash refuses messages (quota used up, plan lapsed, outage) the app switches to backup mode by itself — webhooks still accepted and processed, leads assigned, fan-out off, timer work driven by page views and daily crons — and Super Admins get an alert + banner | 1 | ✅ Done |
+| 2026-10-06 | Telephony: on/off for the 15-min call-report sync; Setup warns when CallerDesk uses an old webhook URL; fixed the webhook limiter that was blocking CallerDesk's IP (one stale key could stop every workspace's call events) | 1 | ✅ Done |
+| 2026-10-06 | Lead layout (Setup → Lead layout, like Zoho): add fields of 16 types, new sections, drag fields and sections into any order, rename / hide system fields; the same layout drives Console details, the lead page, Create Lead and Leads → Manage Columns (custom fields can be columns) | 1 | ✅ Done |
 | 2026-10-06 | Attendance module (sidebar → Attendance, Setup → Attendance (Jibble)): Jibble connection, people matched by email, Today (who's in / on break / out / on leave + alerts), Day sheet (worked hours joined with calls), Leave & holidays; Jibble state on Floor; new leads skip people on approved leave. Needs the owner's Jibble key + migration 0016 | 2 | 🟡 In progress (T2.18–T2.26) |
 | 2026-10-05 | Reports module (sidebar → Reports): Overview, Agents (login/logout, first/last call, dialled & connected per hour, talk time, outcomes, conversion, callback compliance, day sheet), Sources, Calls & callbacks; any period up to 92 days, process filter, CSV per table | 3 | 🟡 In progress (T3.2) |
 | 2026-10-05 | Security: SQL injection guard (lint ban on raw SQL + tests) and rate limits on every screen action, Sync now and webhook key guessing | 1 | ✅ Done |
@@ -295,6 +297,9 @@ Features the owner asked for while building. Each is live unless marked otherwis
 
 | Date | Change |
 | --- | --- |
+| 2026-10-06 | Owner report: too many warnings — call webhooks rejected (old URL in CallerDesk) and then blocked by the limiter; added sync on/off + fix |
+| 2026-10-06 | T1.42 manager digest built (waiting on a valid Resend key + verified domain); T1.43–T1.44 nightly backups done — separate private Blob store chosen by the owner, verified live |
+| 2026-10-06 | Owner request: Zoho-style field / section layout for leads, shown in Console, Leads edit, Create and Manage Columns |
 | 2026-10-06 | Owner request: manage one person across several workspaces from one place — added as T3.19 (Phase 3). Today it works by adding the same email in each workspace's Team (Super Admin) |
 | 2026-10-06 | Owner request: Attendance module from Jibble — connect + employee sync (by email), live attendance, daily agent sheet, leave & holidays. T2.18–T2.21, T2.23, T2.25, T2.26 started |
 | 2026-10-05 | Owner request: Reports module — funnel, agents (first/last call, per-hour dialled/connected, login/logout), sources, calls & callbacks. T3.2 started |

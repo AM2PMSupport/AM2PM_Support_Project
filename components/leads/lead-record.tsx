@@ -24,6 +24,8 @@ import { LeadTimeline } from "@/components/console/lead-timeline";
 import { SOURCE_LABEL } from "@/components/leads/meta";
 import type { LeadDetail } from "@/lib/agent/queue";
 import type { LeadForEdit } from "@/lib/leads/edit";
+import type { ResolvedField, SystemKey } from "@/lib/leads/layout";
+import { FieldInput, formatValue } from "@/components/leads/field-input";
 
 type Form = { name: string; phone: string; altPhone: string; email: string; campaign: string; stage: string; ownerId: string; custom: Record<string, string> };
 
@@ -81,28 +83,103 @@ export function LeadRecord({ detail, edit, owners, timeZone, backHref }: { detai
   }
 
 
-  const system: [string, React.ReactNode][] = [
-    ["Process", detail.processName],
-    ["Source", <Tag key="s">{SOURCE_LABEL[detail.source] ?? detail.source}</Tag>],
-    ["Status", <Tag key="st" tone={statusTone(detail.status)}>{detail.status === "dnc" ? "DNC" : detail.status[0]!.toUpperCase() + detail.status.slice(1)}</Tag>],
-    ["Stage", <StageTag key="sg" stage={detail.stage} />],
-    ["Lead owner", detail.owner ?? <span className="text-ember-ink">Unassigned</span>],
-    ["Assigned", when(detail.assignedAt)],
-    ["Attempts", <span key="a" className="font-mono tnum">{detail.attempts}</span>],
-    ["Last outcome", detail.lastDisposition],
-    ["Next callback", when(detail.nextCallbackAt)],
-    ["Last activity", when(detail.lastActivityAt)],
-    ["Last enquiry", when(detail.lastEnquiryAt)],
-    ["Converted", when(detail.convertedAt)],
-    ["Created", when(detail.createdAt)],
-    ["Do not call", detail.dnc ? <span key="d" className="font-semibold text-ember-ink">Yes</span> : "No"],
-  ];
+  /** Read-only value of a system field (lead page). */
+  const sysValue = (k: SystemKey): React.ReactNode => {
+    switch (k) {
+      case "name": return detail.name;
+      case "phone": return <span className="font-mono tnum">{detail.phone}</span>;
+      case "altPhone": return detail.altPhone ? <span className="font-mono tnum">{detail.altPhone}</span> : null;
+      case "email": return detail.email;
+      case "city": return typeof detail.custom.city === "string" ? detail.custom.city : null;
+      case "campaign": return detail.campaign;
+      case "process": return detail.processName;
+      case "source": return <Tag>{SOURCE_LABEL[detail.source] ?? detail.source}</Tag>;
+      case "status": return <Tag tone={statusTone(detail.status)}>{detail.status === "dnc" ? "DNC" : detail.status[0]!.toUpperCase() + detail.status.slice(1)}</Tag>;
+      case "stage": return <StageTag stage={detail.stage} />;
+      case "owner": return detail.owner ?? <span className="text-ember-ink">Unassigned</span>;
+      case "assignedAt": return when(detail.assignedAt);
+      case "attempts": return <span className="font-mono tnum">{detail.attempts}</span>;
+      case "lastOutcome": return detail.lastDisposition;
+      case "nextCallback": return when(detail.nextCallbackAt);
+      case "lastActivity": return when(detail.lastActivityAt);
+      case "lastEnquiry": return when(detail.lastEnquiryAt);
+      case "convertedAt": return when(detail.convertedAt);
+      case "createdAt": return when(detail.createdAt);
+      case "dnc": return detail.dnc ? <span className="font-semibold text-ember-ink">Yes</span> : "No";
+    }
+  };
+  const readValue = (f: ResolvedField): React.ReactNode => {
+    if (f.kind === "sys") return sysValue(f.key);
+    const v = formatValue(f.def, detail.custom[f.key], detail.people, timeZone);
+    if (!v) return null;
+    return f.def.type === "url" ? <a href={v} target="_blank" rel="noopener noreferrer" className="break-all text-teal-ink hover:underline">{v}</a> : <span className={f.def.type === "textarea" ? "whitespace-pre-wrap" : ""}>{v}</span>;
+  };
 
-  // Read-only view of custom data (no edit right): defined fields, then extra columns.
-  const customRead = [
-    ...detail.fields.map((f) => [f.label, detail.custom[f.key]] as const),
-    ...Object.entries(detail.custom).filter(([k]) => !detail.fields.some((f) => f.key === k)).map(([k, v]) => [k.replace(/_/g, " "), v] as const),
-  ];
+  /** One layout field in the edit form; read-only system fields show their value. */
+  const editField = (f: ResolvedField) => {
+    if (!edit || !form) return null;
+    const wide = f.kind === "cf" && ["textarea", "multiselect", "radio"].includes(f.def.type);
+    if (f.kind === "cf") {
+      return (
+        <div key={f.ref} className={wide ? "md:col-span-2" : ""}>
+          <Field label={`${f.label}${f.def.required ? " *" : ""}`}>
+            <FieldInput def={f.def} value={form.custom[f.key] ?? ""} onChange={(v) => set({ custom: { ...form.custom, [f.key]: v } })} people={edit.people} />
+          </Field>
+        </div>
+      );
+    }
+    switch (f.key) {
+      case "name":
+        return <Field key={f.ref} label={f.label}><Input value={form.name} onChange={(e) => set({ name: e.target.value })} required maxLength={120} /></Field>;
+      case "email":
+        return <Field key={f.ref} label={f.label}><Input type="email" value={form.email} onChange={(e) => set({ email: e.target.value })} maxLength={254} /></Field>;
+      case "phone":
+        return (
+          <Field key={f.ref} label={f.label} hint={edit.canEditPhone ? "10-digit Indian mobile; +91 optional" : "Hidden for your role — ask a manager to change it"}>
+            <Input value={form.phone} onChange={(e) => set({ phone: e.target.value })} disabled={!edit.canEditPhone} inputMode="tel" maxLength={20} />
+          </Field>
+        );
+      case "altPhone":
+        return (
+          <Field key={f.ref} label={f.label} hint={edit.canEditPhone ? "Optional second number — leave empty to remove" : undefined}>
+            <Input value={form.altPhone} onChange={(e) => set({ altPhone: e.target.value })} disabled={!edit.canEditPhone} inputMode="tel" maxLength={20} placeholder="—" />
+          </Field>
+        );
+      case "city":
+        return <Field key={f.ref} label={f.label}><Input value={form.custom.city ?? ""} onChange={(e) => set({ custom: { ...form.custom, city: e.target.value } })} maxLength={60} /></Field>;
+      case "campaign":
+        return <Field key={f.ref} label={f.label}><Input value={form.campaign} onChange={(e) => set({ campaign: e.target.value })} maxLength={120} /></Field>;
+      case "stage":
+        return (
+          <Field key={f.ref} label={f.label} hint={edit.status !== "open" ? `Lead is ${edit.status}` : undefined}>
+            <Select value={form.stage} onChange={(e) => set({ stage: e.target.value })} disabled={edit.status !== "open"}>
+              {edit.stages.map((st) => <option key={st} value={st}>{st}</option>)}
+            </Select>
+          </Field>
+        );
+      case "owner":
+        return (
+          <Field key={f.ref} label={f.label} hint={edit.canChangeOwner ? undefined : "Your role can't reassign"}>
+            <Select value={form.ownerId} onChange={(e) => set({ ownerId: e.target.value })} disabled={!edit.canChangeOwner}>
+              <option value="">{edit.ownerId ? "—" : "Unassigned"}</option>
+              {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          </Field>
+        );
+      default:
+        return (
+          <div key={f.ref} className="min-w-0">
+            <div className="mb-1.5 text-[12px] font-medium text-ink-2">{f.label}</div>
+            <div className="flex h-9 items-center text-[13px]">{sysValue(f.key) ?? <span className="text-ink-4">—</span>}</div>
+          </div>
+        );
+    }
+  };
+
+  // Read-only extra columns (no edit right): keys that aren't defined fields.
+  const customRead = Object.entries(detail.custom)
+    .filter(([k]) => k !== "city" && !detail.fields.some((f) => f.key === k))
+    .map(([k, v]) => [k.replace(/_/g, " "), v] as const);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -139,61 +216,19 @@ export function LeadRecord({ detail, edit, owners, timeZone, backHref }: { detai
             <ErrorNote message={error} />
             {edit && form ? (
               <form id="lead-form" onSubmit={save} className="flex flex-col gap-5">
+                {/* Sections and order from Setup → Lead layout. */}
+                {edit.layout.map((sec) => (
+                  <section key={sec.id} className="panel p-5">
+                    <div className="eyebrow mb-3">{sec.title}</div>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{sec.fields.map((f) => editField(f))}</div>
+                  </section>
+                ))}
                 <section className="panel p-5">
-                  <div className="eyebrow mb-3">Contact</div>
+                  <div className="eyebrow mb-3">Other details</div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <Field label="Name"><Input value={form.name} onChange={(e) => set({ name: e.target.value })} required maxLength={120} /></Field>
-                    <Field label="Email"><Input type="email" value={form.email} onChange={(e) => set({ email: e.target.value })} maxLength={254} /></Field>
-                    <Field label="Mobile" hint={edit.canEditPhone ? "10-digit Indian mobile; +91 optional" : "Hidden for your role — ask a manager to change it"}>
-                      <Input value={form.phone} onChange={(e) => set({ phone: e.target.value })} disabled={!edit.canEditPhone} inputMode="tel" maxLength={20} />
-                    </Field>
-                    <Field label="Mobile 2" hint={edit.canEditPhone ? "Optional second number — leave empty to remove" : undefined}>
-                      <Input value={form.altPhone} onChange={(e) => set({ altPhone: e.target.value })} disabled={!edit.canEditPhone} inputMode="tel" maxLength={20} placeholder="—" />
-                    </Field>
-                  </div>
-                </section>
-
-                <section className="panel p-5">
-                  <div className="eyebrow mb-3">Lead</div>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <Field label="Stage" hint={edit.status !== "open" ? `Lead is ${edit.status}` : undefined}>
-                      <Select value={form.stage} onChange={(e) => set({ stage: e.target.value })} disabled={edit.status !== "open"}>
-                        {edit.stages.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </Select>
-                    </Field>
-                    <Field label="Lead owner" hint={edit.canChangeOwner ? undefined : "Your role can't reassign"}>
-                      <Select value={form.ownerId} onChange={(e) => set({ ownerId: e.target.value })} disabled={!edit.canChangeOwner}>
-                        <option value="">{edit.ownerId ? "—" : "Unassigned"}</option>
-                        {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                      </Select>
-                    </Field>
-                    <Field label="Campaign"><Input value={form.campaign} onChange={(e) => set({ campaign: e.target.value })} maxLength={120} /></Field>
-                  </div>
-                </section>
-
-                <section className="panel p-5">
-                  <div className="eyebrow mb-3">Details · custom fields</div>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {edit.fields.map((f) => (
-                      <Field key={f.key} label={`${f.label}${f.required ? " *" : ""}`} hint={f.type === "multiselect" ? `Comma-separated: ${f.options.join(", ")}` : undefined}>
-                        {f.type === "dropdown" || f.type === "boolean" ? (
-                          <Select value={f.type === "boolean" ? ({ true: "yes", false: "no" } as Record<string, string>)[form.custom[f.key] ?? ""] ?? form.custom[f.key] ?? "" : form.custom[f.key] ?? ""} onChange={(e) => set({ custom: { ...form.custom, [f.key]: e.target.value } })}>
-                            <option value="">—</option>
-                            {(f.type === "boolean" ? ["yes", "no"] : f.options).map((o) => <option key={o} value={o}>{f.type === "boolean" ? (o === "yes" ? "Yes" : "No") : o}</option>)}
-                          </Select>
-                        ) : (
-                          <Input
-                            type={f.type === "date" ? "date" : "text"}
-                            inputMode={f.type === "number" ? "decimal" : undefined}
-                            value={form.custom[f.key] ?? ""}
-                            onChange={(e) => set({ custom: { ...form.custom, [f.key]: e.target.value } })}
-                          />
-                        )}
-                      </Field>
-                    ))}
                     {/* Extra columns that came with the lead (imports, forms). */}
                     {Object.keys(form.custom)
-                      .filter((k) => !edit.fields.some((f) => f.key === k))
+                      .filter((k) => k !== "city" && !edit.fields.some((f) => f.key === k))
                       .map((k) => (
                         <Field key={k} label={k.replace(/_/g, " ")}>
                           <div className="flex gap-2">
@@ -203,7 +238,6 @@ export function LeadRecord({ detail, edit, owners, timeZone, backHref }: { detai
                         </Field>
                       ))}
                   </div>
-                  {!edit.fields.length && !Object.keys(form.custom).length && <p className="text-[12.5px] text-ink-4">No custom fields for this process yet (Setup → Outcomes & fields).</p>}
                   <div className="mt-4 flex max-w-[460px] gap-2">
                     <Input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Add a detail (e.g. Budget)" maxLength={40} />
                     <button
@@ -222,30 +256,35 @@ export function LeadRecord({ detail, edit, owners, timeZone, backHref }: { detai
                 </section>
               </form>
             ) : (
-              <section className="panel p-5">
-                <div className="eyebrow mb-3">Contact & details</div>
-                <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-[13px] md:grid-cols-2">
-                  {([["Name", detail.name], ["Email", detail.email], ["Mobile", detail.phone], ["Mobile 2", detail.altPhone], ["Campaign", detail.campaign], ...customRead] as [string, unknown][]).map(([k, v]) => (
-                    <div key={k}>
-                      <dt className="text-[11.5px] text-ink-3 capitalize">{k}</dt>
-                      <dd className="mt-0.5">{v == null || v === "" ? <span className="text-ink-4">—</span> : Array.isArray(v) ? v.join(", ") : String(v)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            )}
-
-            <section className="panel p-5">
-              <div className="eyebrow mb-3">System fields</div>
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] md:grid-cols-3 xl:grid-cols-4">
-                {system.map(([k, v]) => (
-                  <div key={k} className="min-w-0">
-                    <dt className="text-[11.5px] text-ink-3">{k}</dt>
-                    <dd className="mt-0.5 truncate">{v ?? <span className="text-ink-4">—</span>}</dd>
-                  </div>
+              <>
+                {detail.layout.map((sec) => (
+                  <section key={sec.id} className="panel p-5">
+                    <div className="eyebrow mb-3">{sec.title}</div>
+                    <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-[13px] md:grid-cols-2 xl:grid-cols-3">
+                      {sec.fields.map((f) => (
+                        <div key={f.ref} className="min-w-0">
+                          <dt className="text-[11.5px] text-ink-3">{f.label}</dt>
+                          <dd className="mt-0.5 break-words">{readValue(f) ?? <span className="text-ink-4">—</span>}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
                 ))}
-              </dl>
-            </section>
+                {customRead.length > 0 && (
+                  <section className="panel p-5">
+                    <div className="eyebrow mb-3">Other details</div>
+                    <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-[13px] md:grid-cols-2">
+                      {customRead.map(([k, v]) => (
+                        <div key={k}>
+                          <dt className="text-[11.5px] text-ink-3 capitalize">{k}</dt>
+                          <dd className="mt-0.5">{v == null || v === "" ? <span className="text-ink-4">—</span> : Array.isArray(v) ? v.join(", ") : String(v)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                )}
+              </>
+            )}
           </div>
         </div>
 

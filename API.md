@@ -54,7 +54,7 @@ Email + password sign-in. Body `{ "email": "…", "password": "…" }`.
 | 400 | `bad_request` | Missing / invalid email or password |
 | 401 | `invalid_credentials` | Wrong email or password (same message for both) |
 | 429 | `too_many_attempts` | 5 failures for this email or 300 from this IP in 15 min (a whole office shares one IP) |
-| 429 | `rate_limited` | Webhooks (`/api/hooks/*`): this IP sent 30 wrong keys / unknown workspace or source in 15 min |
+| 429 | `rate_limited` | Webhooks (`/api/hooks/*`): this IP called 30 unknown workspaces / sources in 15 min. A wrong key for a real workspace is a 401 and never leads to 429 |
 
 The login is one per person across workspaces (SECURITY.md §3.1); sign-in opens the workspace used last, and the in-app switcher re-issues the cookie for another membership. Cookies issued before 2026-10-02 (no login id) are rejected once — sign in again.
 

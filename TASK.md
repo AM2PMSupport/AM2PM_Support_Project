@@ -96,9 +96,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] T1.41 Conversion transaction (status won, converted_at, open_leads − 1, events)
 
 ### Notifications and backup
-- [ ] T1.42 Email sender (Resend) + manager digest cron 09:00
-- [ ] T1.43 Per-tenant backup worker: stream 5,000/batch, gzip, envelope AES-256-GCM, multipart to R2, cursor + re-queue, manifest
-- [ ] T1.44 `backup_policies`, `backup_snapshots`; nightly cron 01:30; `backup.completed/failed` alerts
+- [~] T1.42 Email sender (Resend) + manager digest cron 09:00 — Built 2026-10-06: Resend adapter `lib/providers/email/resend.ts` (idempotency key per digest), digest per recipient in their own scope (admins / supervisors / managers): yesterday's leads, reached, won/lost, calls, callback compliance; today's callbacks due, overdue, unassigned, never-called; hot leads; outcomes — sent 09:00–12:00 workspace time once a day from the tick. Waiting on the owner: a valid RESEND_API_KEY (the stored one is rejected) + am2pmsupport.com verified in Resend
+- [x] T1.43 Per-tenant backup worker: stream 5,000/batch, gzip, envelope AES-256-GCM, multipart to R2, cursor + re-queue, manifest — Done 2026-10-06: every tenant table (+ the workspace row) read on a replica under RLS in primary-key order, 5,000 rows per file, gzip + AES-256-GCM with a per-snapshot data key wrapped by the master key, into a SEPARATE private Blob store `am2pm-crm-backups` (owner chose Blob over R2); progress saved after each file, resumes next run; SHA-256 per file; verified live (leads read back = database)
+- [x] T1.44 `backup_policies`, `backup_snapshots`; nightly cron 01:30; `backup.completed/failed` alerts — Done 2026-10-06: one cron snapshot per workspace per day (unique index), Vercel cron `/api/cron/backups` 20:00 UTC = 01:30 IST + tick continues unfinished ones; retention from backup_policies (7 daily / 4 weekly / 3 monthly); `backup.completed` / `backup.failed` events; failure → in-app alert to Super Admins
 
 ### Migration and gate
 - [ ] T1.45 Migration script per spreadsheet: CRM_Calling, Marketing_Leads, CRM_WebhookLog, MissedCalls → tables; roster, dropdowns; Timeline History → `lead_events`; count reconciliation

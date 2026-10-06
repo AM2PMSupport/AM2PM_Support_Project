@@ -14,7 +14,8 @@ import { ApiError } from "@/lib/http/errors";
 import { log } from "@/lib/log";
 import { ProcessInput, createProcess, updateProcess, DispositionInput, createDisposition, setDispositionActive } from "@/lib/admin/processes";
 import { UserInput, createUser, updateUser, resetUserPassword } from "@/lib/admin/users";
-import { FieldInput, createField, setFieldActive } from "@/lib/admin/custom-fields";
+import { FieldEdit, FieldInput, createField, setFieldActive, updateField } from "@/lib/admin/custom-fields";
+import { resetLayout, saveLayout } from "@/lib/admin/layout";
 import { SourceInput, createSource, rotateSourceKey, setSourceStatus } from "@/lib/admin/sources";
 import { WorkspaceInput, createWorkspace, setWorkspaceStatus } from "@/lib/platform-admin/workspaces";
 import { StartImportInput, startImport, listImports } from "@/lib/imports/run";
@@ -27,7 +28,7 @@ import { accountOfMember } from "@/lib/attendance/view";
 import { cookies } from "next/headers";
 import { membershipsOf } from "@/lib/platform-admin/auth";
 import { sessionCookieOptions, sessionToken } from "@/lib/auth/cookie";
-import { CredentialsInput, DidInput, saveCallerDesk, rotateWebhookSecret, addDid, removeDid, testAgentPhone } from "@/lib/admin/telephony";
+import { CredentialsInput, DidInput, saveCallerDesk, rotateWebhookSecret, addDid, removeDid, testAgentPhone, setCallSync } from "@/lib/admin/telephony";
 
 export type ActionResult<T = undefined> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -144,3 +145,11 @@ export const linkJibblePersonAction = async (personId: unknown, userId: unknown)
     const accountId = uid ? await accountOfMember(ctx, uid) : null;
     return linkPerson(ctx, pid, accountId);
   });
+
+// Lead layout (Setup → Lead layout): config E, normalised + audited in lib/admin/layout.ts.
+export const saveLayoutAction = async (layout: unknown) => run((ctx) => saveLayout(ctx, layout));
+export const resetLayoutAction = async () => run((ctx) => resetLayout(ctx));
+/** Create a field from the layout palette; returns the definition so the editor can place it. */
+export const createLayoutFieldAction = async (input: unknown) => run((ctx) => createField(ctx, FieldInput.parse(input)));
+export const updateFieldAction = async (id: unknown, input: unknown) => run((ctx) => updateField(ctx, Id.parse(id), FieldEdit.parse(input)).then(() => undefined));
+export const setCallSyncAction = async (on: unknown) => run((ctx) => setCallSync(ctx, z.boolean().parse(on)));

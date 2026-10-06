@@ -27,6 +27,11 @@ export interface FilterOptions {
   campaigns?: { v: string; n: number }[];
   outcomes?: { v: string; n: number }[];
   fields?: FilterField[];
+  /** Setup → Lead layout: Manage Columns + Create Lead. */
+  columns?: { key: string; label: string }[];
+  people?: { id: string; name: string }[];
+  layout?: import("@/lib/leads/layout").Layout;
+  fieldDefs?: (import("@/lib/leads/layout").FieldDef & { processId: string | null })[];
 }
 export interface SavedView {
   id: string;

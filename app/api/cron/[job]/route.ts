@@ -20,7 +20,7 @@ import { log } from "@/lib/log";
 export const maxDuration = 60;
 
 // Schedules are UTC in vercel.json: 20:30 UTC = 02:00 IST, 21:00 UTC = 02:30 IST.
-const CRON_JOBS = new Set<JobName>(["relay-outbox", "sweep-unassigned", "sweep-stuck-calls", "purge-expired", "recount-open-leads", "callback-reminders", "tick"]);
+const CRON_JOBS = new Set<JobName>(["relay-outbox", "sweep-unassigned", "sweep-stuck-calls", "purge-expired", "recount-open-leads", "callback-reminders", "tick", "backups"]);
 
 export const GET = handle(async (req: Request, { params }: { params: Promise<{ job: string }> }): Promise<Response> => {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");

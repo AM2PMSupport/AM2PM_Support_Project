@@ -39,6 +39,8 @@ export interface JobPayloads {
   "sync-calls-tenant": { tenantId: string };
   /** Copy a provider recording URL into Blob/R2. */
   "copy-recording": { tenantId: string; interactionId: string };
+  /** Nightly per-workspace backups: create today's snapshots, continue unfinished ones (T1.43–T1.44). */
+  backups: Record<string, never>;
 }
 
 export type JobName = keyof JobPayloads;
@@ -58,6 +60,7 @@ export const JOB_NAMES = [
   "sync-calls",
   "sync-calls-tenant",
   "tick",
+  "backups",
 ] as const satisfies readonly JobName[];
 
 export function isJobName(v: string): v is JobName {

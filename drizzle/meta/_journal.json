@@ -120,6 +120,20 @@
       "when": 1791227486543,
       "tag": "0016_attendance",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791273905455,
+      "tag": "0017_field_layouts",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791275905620,
+      "tag": "0018_backup_progress",
+      "breakpoints": true
     }
   ]
 }

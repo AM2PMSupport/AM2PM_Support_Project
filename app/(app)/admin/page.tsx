@@ -42,6 +42,8 @@ import { getTelephony } from "@/lib/admin/telephony";
 import { jibbleStatus } from "@/lib/platform-admin/attendance";
 import { memberOptions } from "@/lib/attendance/view";
 import { JibblePanel } from "@/components/admin/jibble-panel";
+import { LayoutEditor } from "@/components/admin/layout-editor";
+import { getLayoutEditor } from "@/lib/admin/layout";
 import { webhookSubscriptions } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 
@@ -52,6 +54,7 @@ const TABS = [
   { id: "processes", label: "Processes" },
   { id: "team", label: "Team" },
   { id: "outcomes", label: "Outcomes & fields" },
+  { id: "layout", label: "Lead layout" },
   { id: "sources", label: "Lead sources" },
   { id: "telephony", label: "Telephony" },
   { id: "attendance", label: "Attendance (Jibble)" },
@@ -106,6 +109,7 @@ function setupGroups(who: Who): SetupGroup[] {
         ? [
             { label: "Processes & pipelines", href: t("processes"), hint: "Stages, won stage, dedupe rule" },
             { label: "Outcomes & fields", href: t("outcomes"), hint: "Call dispositions, custom lead fields" },
+            { label: "Lead layout", href: t("layout"), hint: "Sections, field order, new fields — Console, lead page, Create Lead, columns" },
           ]
         : [],
     },
@@ -154,6 +158,7 @@ function tabVisible(id: TabId, who: Who): boolean {
     case "company":
     case "processes":
     case "outcomes":
+    case "layout":
     case "telephony":
     case "data":
       return can(who, "config", "V");
@@ -302,6 +307,9 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
     ) : (
       <NoAccess />
     );
+  } else if (tab === "layout") {
+    const ed = await getLayoutEditor(ctx);
+    body = <LayoutEditor initial={ed.layout} fields={ed.fields} processes={ed.processes} canEdit={can(ctx.actor, "config", "E")} />;
   } else if (tab === "attendance") {
     body = <JibblePanel data={await jibbleStatus()} members={await memberOptions(ctx)} timeZone={ctx.timezone} />;
   } else if (tab === "telephony") {
